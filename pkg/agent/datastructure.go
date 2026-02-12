@@ -1,6 +1,9 @@
 package agent
 
 type Agent struct {
+	// SourceFile is the path to the file this agent was loaded from.
+	// This is not serialized.
+	SourceFile string `json:"-" yaml:"-"`
 	// name of the agent
 	Name string `json:"name" yaml:"name"`
 	// description of what the agent does

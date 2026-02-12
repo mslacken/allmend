@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/template"
 
 	"github.com/SUSE/allmend/pkg/agent"
@@ -15,7 +14,7 @@ var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List all available agents",
-	Long:    `Scan the configured agent paths and list all .agt files found.`,
+	Long:    `Scan the configured agent paths and list all .agt, .json, .yaml, and .yml files found.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		paths := viper.GetStringSlice("agent_paths")
 		if len(paths) == 0 {
@@ -32,36 +31,21 @@ var listCmd = &cobra.Command{
 
 		fmt.Println("Searching for agents in:", paths)
 
-		for _, p := range paths {
-			// Resolve relative paths if necessary (relative to where command runs)
-			// Glob for *.agt
-			files, err := filepath.Glob(filepath.Join(p, "*.agt"))
-			if err != nil {
-				fmt.Printf("Error searching in %s: %v\n", p, err)
-				continue
+		agents, errs := agent.List(paths)
+		for _, err := range errs {
+			fmt.Printf("Error: %v\n", err)
+		}
+
+		if len(agents) == 0 {
+			if len(errs) == 0 {
+				fmt.Println("No agents found.")
 			}
+			return
+		}
 
-			if len(files) == 0 {
-				continue
-			}
-
-			for _, file := range files {
-				f, err := os.Open(file)
-				if err != nil {
-					fmt.Printf("Error opening %s: %v\n", file, err)
-					continue
-				}
-				defer f.Close()
-
-				a, err := agent.ParseAgent(f)
-				if err != nil {
-					fmt.Printf("Error parsing %s: %v\n", file, err)
-					continue
-				}
-
-				if err := tmpl.Execute(os.Stdout, a); err != nil {
-					fmt.Printf("Error executing template: %v\n", err)
-				}
+		for _, a := range agents {
+			if err := tmpl.Execute(os.Stdout, a); err != nil {
+				fmt.Printf("Error executing template: %v\n", err)
 			}
 		}
 	},
