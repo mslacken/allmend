@@ -1,4 +1,4 @@
-package main
+package agentcmd
 
 import (
 	"encoding/json"
@@ -99,5 +99,5 @@ var exportCmd = &cobra.Command{
 
 func init() {
 	exportCmd.Flags().String("format", "", "Format of the output file (json, yaml, agt)")
-	agentCmd.AddCommand(exportCmd)
+	AgentCmd.AddCommand(exportCmd)
 }

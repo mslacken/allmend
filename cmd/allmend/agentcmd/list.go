@@ -1,4 +1,4 @@
-package main
+package agentcmd
 
 import (
 	"fmt"
@@ -53,5 +53,5 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().String("format", "- {{.Name}} (v{{.Meta.Version}}): {{.Description}}\n", "Format string for listing agents")
-	agentCmd.AddCommand(listCmd)
+	AgentCmd.AddCommand(listCmd)
 }

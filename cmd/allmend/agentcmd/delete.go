@@ -1,4 +1,4 @@
-package main
+package agentcmd
 
 import (
 	"fmt"
@@ -47,5 +47,5 @@ var deleteCmd = &cobra.Command{
 }
 
 func init() {
-	agentCmd.AddCommand(deleteCmd)
+	AgentCmd.AddCommand(deleteCmd)
 }
