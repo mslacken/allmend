@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,11 +62,8 @@ Version: 1.0.0
 	}
 
 	// Test List
-	agents, errs := List([]string{tempDir})
-	if len(errs) > 0 {
-		t.Errorf("List returned errors: %v", errs)
-	}
-
+	agents, err := Get([]string{tempDir})
+	assert.NoError(t, err)
 	if len(agents) != 4 {
 		t.Errorf("Expected 4 agents, got %d", len(agents))
 	}

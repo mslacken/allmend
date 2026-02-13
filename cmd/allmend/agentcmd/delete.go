@@ -20,11 +20,14 @@ var deleteCmd = &cobra.Command{
 		paths := viper.GetStringSlice("agent_paths")
 		return agent.ListNames(paths), cobra.ShellCompDirectiveNoFileComp
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		agentName := args[0]
 		paths := viper.GetStringSlice("agent_paths")
 
-		agents, _ := agent.List(paths)
+		agents, err := agent.Get(paths)
+		if err != nil {
+			return err
+		}
 		var targetAgent *agent.Agent
 		for _, a := range agents {
 			if a.Name == agentName {
@@ -36,13 +39,12 @@ var deleteCmd = &cobra.Command{
 		if targetAgent != nil && targetAgent.SourceFile != "" {
 			if err := os.Remove(targetAgent.SourceFile); err != nil {
 				fmt.Printf("Error deleting agent '%s' (file: %s): %v\n", agentName, targetAgent.SourceFile, err)
-				return
+				return nil
 			}
 			fmt.Printf("Deleted agent '%s' (file: %s)\n", agentName, targetAgent.SourceFile)
-			return
+			return nil
 		}
-
-		fmt.Printf("Agent '%s' not found\n", agentName)
+		return fmt.Errorf("Agent '%s' not found\n", agentName)
 	},
 }
 

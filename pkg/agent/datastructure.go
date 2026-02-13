@@ -41,6 +41,18 @@ type MCPTools struct {
 	Keys []string `json:"keys,omitempty" yaml:"keys,omitempty"`
 }
 
+type VariableList struct {
+	// List all the variables which can be used for the mission
+	List map[string]Variable
+}
+
+type Variable struct {
+	// variable which can be used inside the mission, like the target of mission
+	Value string
+	// define the type of variable, like string, number ip address
+	Type string
+}
+
 type AgentMission struct {
 	// Exact description of what the agent should do
 	Content string `json:"content" yaml:"content"`

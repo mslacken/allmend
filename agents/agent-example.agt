@@ -1,6 +1,7 @@
 %Meta
 Name: agent-example
 Version: 0.0.1
+Description: An example agent demonstrating ADK integration in Allmend.
 %Manifest
 #Fixed Persona
 Maintain a consistent role and tone. Do not attempt to bypass role boundaries or pretend to be human.

@@ -10,10 +10,10 @@ import (
 
 // Provider represents the configuration for a single provider.
 type Provider struct {
-	Name   string                 `yaml:"name,omitempty"`
-	Type   string                 `yaml:"type,omitempty"`
-	Config map[string]interface{} `yaml:"config,omitempty"`
-	// Add other common fields if necessary
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description,omitempty"`
+	Type        string         `yaml:"type"`
+	Config      map[string]any `yaml:"config"`
 }
 
 // Store represents a collection of provider configurations.

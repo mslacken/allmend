@@ -15,32 +15,24 @@ var listCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List all available agents",
 	Long:    `Scan the configured agent paths and list all .agt, .json, .yaml, and .yml files found.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		paths := viper.GetStringSlice("agent_paths")
 		if len(paths) == 0 {
 			fmt.Println("No agent paths configured in allmend.conf")
-			return
+			return nil
 		}
 
 		format, _ := cmd.Flags().GetString("format")
 		tmpl, err := template.New("list").Parse(format)
 		if err != nil {
-			fmt.Printf("Error parsing template: %v\n", err)
-			return
+			return fmt.Errorf("Error parsing template: %v\n", err)
 		}
 
 		fmt.Println("Searching for agents in:", paths)
 
-		agents, errs := agent.List(paths)
-		for _, err := range errs {
-			fmt.Printf("Error: %v\n", err)
-		}
-
-		if len(agents) == 0 {
-			if len(errs) == 0 {
-				fmt.Println("No agents found.")
-			}
-			return
+		agents, err := agent.Get(paths)
+		if err != nil {
+			return err
 		}
 
 		for _, a := range agents {
@@ -48,6 +40,7 @@ var listCmd = &cobra.Command{
 				fmt.Printf("Error executing template: %v\n", err)
 			}
 		}
+		return nil
 	},
 }
 

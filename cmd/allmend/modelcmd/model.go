@@ -13,8 +13,8 @@ var ModelCmd = &cobra.Command{
 	Long:  `Manage the available AI models for Allmend.`,
 }
 
-// getModelsFilePath determines the path to the models YAML file.
-func getModelsFilePath() (string, error) {
+// GetModelsFilePath determines the path to the models YAML file.
+func GetModelsFilePath() (string, error) {
 	// 1. Check if configured explicitly in allmend.conf
 	if path := viper.GetString("models_file"); path != "" {
 		return path, nil

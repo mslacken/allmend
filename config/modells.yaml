@@ -1,13 +1,4 @@
-gpt-4:
+granite4:3b:
+  name: granite4:3b
   type: chat
-  provider: openai
-  description: "GPT-4 model from OpenAI"
-  config:
-    model: gpt-4
-
-claude-3-opus:
-  type: chat
-  provider: anthropic
-  description: "Claude 3 Opus model from Anthropic"
-  config:
-    model: claude-3-opus-20240229
+  provider: local

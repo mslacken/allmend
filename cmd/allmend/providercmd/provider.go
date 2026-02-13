@@ -17,8 +17,8 @@ var ProviderCmd = &cobra.Command{
 	Long:  `List and manage available model providers.`,
 }
 
-// getProvidersFilePath determines the path to the providers configuration file.
-func getProvidersFilePath() (string, error) {
+// GetProvidersFilePath determines the path to the providers configuration file.
+func GetProvidersFilePath() (string, error) {
 	// 1. Check if configured explicitly in allmend.conf
 	if path := viper.GetString("providers_file"); path != "" {
 		return path, nil
@@ -40,7 +40,7 @@ var listProvidersCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List available providers",
 	Run: func(cmd *cobra.Command, args []string) {
-		path, err := getProvidersFilePath()
+		path, err := GetProvidersFilePath()
 		if err != nil {
 			fmt.Printf("Error determining providers file path: %v\n", err)
 			return

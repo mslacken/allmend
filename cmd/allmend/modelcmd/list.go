@@ -15,7 +15,7 @@ var listModelsCmd = &cobra.Command{
 	Short:   "List available models",
 	Long:    `List all AI models configured in the models definition file.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		path, err := getModelsFilePath()
+		path, err := GetModelsFilePath()
 		if err != nil {
 			fmt.Printf("Error determining models file path: %v\n", err)
 			return

@@ -12,5 +12,6 @@ type Model struct {
 type Store struct {
 	Items map[string]Model `yaml:",inline"`
 	// Path is the file path where the models are stored.
-	Path string `yaml:"-"`
+	Path         string `yaml:"-"`
+	DefaultModel string `yaml:"default"`
 }
