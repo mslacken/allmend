@@ -1,8 +1,8 @@
 package agentcmd
 
 import (
-	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 
@@ -15,8 +15,9 @@ import (
 	"github.com/spf13/viper"
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/cmd/launcher"
-	"google.golang.org/adk/cmd/launcher/console"
+	"google.golang.org/adk/runner"
+	"google.golang.org/adk/session"
+	"google.golang.org/genai"
 )
 
 var runCmd = &cobra.Command{
@@ -25,9 +26,16 @@ var runCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		agentName := args[0]
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer stop()
 
+		/*
+			go func() {
+				<-ctx.Done()
+				//
+				// os.Stdin.Close()
+			}()
+		*/
 		// 1. Load agent
 		paths := viper.GetStringSlice("agent_paths")
 		agents, err := agent.Get(paths)
@@ -94,15 +102,52 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("Error creating ADK agent: %v\n", err)
 		}
+		sessionService := session.InMemoryService()
+		session, err := sessionService.Create(ctx, &session.CreateRequest{
+			AppName: agentName, UserID: "baar",
+		})
+		if err != nil {
+			log.Fatalf("Failed to create session: %v", err)
+		}
+		agentRunner, err := runner.New(runner.Config{
+			AppName:        agentName,
+			Agent:          adkAgent,
+			SessionService: sessionService,
+		})
+		if err != nil {
+			log.Fatalf("Failed to create runner: %v", err)
+		}
 
 		// 6. Run launcher
-		fmt.Printf("Running agent '%s' using model '%s'...\n", agentName, modelName)
-		agentLauncher := console.NewLauncher()
-		if err := agentLauncher.Run(ctx, &launcher.Config{
-			AgentLoader: adkagent.NewSingleLoader(adkAgent),
-		}); err != nil {
-			return fmt.Errorf("Error running agent: %v\n", err)
+		for event, err := range agentRunner.Run(ctx, "baar", session.Session.ID(),
+			genai.NewContentFromText(targetAgent.Mission.Content, genai.RoleUser), adkagent.RunConfig{
+				StreamingMode: adkagent.StreamingModeNone,
+			}) {
+			if err != nil {
+				fmt.Printf("\nAGENT_ERROR: %v\n", err)
+				continue
+			}
+			if event.Content != nil {
+				for _, part := range event.Content.Parts {
+					if part.Text != "" {
+						fmt.Printf(part.Text)
+					}
+				}
+				fmt.Println()
+			}
 		}
+
+		/*
+			fmt.Printf("Running agent '%s' using model '%s'...\n", agentName, modelName)
+			agentLauncher := console.NewLauncher()
+			fmt.Printf("Keyword: %s", agentLauncher.Keyword())
+			if err := agentLauncher.Run(ctx, &launcher.Config{
+				AgentLoader: adkagent.NewSingleLoader(adkAgent),
+			}); err != nil {
+				return fmt.Errorf("Error running agent: %v\n", err)
+			}
+			return nil
+		*/
 		return nil
 	},
 }

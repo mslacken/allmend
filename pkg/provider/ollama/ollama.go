@@ -43,14 +43,30 @@ func (p *Provider) Name() string {
 // GenerateContent generates content from the model.
 func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		messages := make([]api.Message, 0, len(req.Contents))
+		messages := make([]api.Message, 0, len(req.Contents)+1)
+
+		if req.Config != nil && req.Config.SystemInstruction != nil {
+			var systemText string
+			for _, part := range req.Config.SystemInstruction.Parts {
+				if part.Text != "" {
+					systemText += part.Text
+				}
+			}
+			if systemText != "" {
+				messages = append(messages, api.Message{
+					Role:    "system",
+					Content: systemText,
+				})
+			}
+		}
+
 		for _, content := range req.Contents {
 			role := content.Role
 			// Map genai roles to ollama roles
 			if role == "model" {
 				role = "assistant"
 			}
-			
+
 			var textContent string
 			for _, part := range content.Parts {
 				if part.Text != "" {
@@ -58,7 +74,7 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				}
 				// TODO: Handle other part types like images if needed
 			}
-			
+
 			messages = append(messages, api.Message{
 				Role:    role,
 				Content: textContent,
@@ -82,7 +98,7 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				// Map other fields as best as possible
 				TurnComplete: resp.Done,
 			}
-			
+
 			if resp.Done {
 				llmResp.FinishReason = genai.FinishReasonStop
 			}
