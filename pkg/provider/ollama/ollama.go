@@ -6,6 +6,8 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"os"
+	"time"
 
 	"github.com/ollama/ollama/api"
 	"google.golang.org/adk/model"
@@ -85,6 +87,31 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			Model:    p.model,
 			Messages: messages,
 			Stream:   &stream,
+		}
+
+		if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
+			debugReq := *chatReq
+			debugReq.DebugRenderOnly = true
+			streamFalse := false
+			debugReq.Stream = &streamFalse
+
+			_ = p.client.Chat(ctx, &debugReq, func(resp api.ChatResponse) error {
+				var rendered string
+				if resp.DebugInfo != nil {
+					rendered = resp.DebugInfo.RenderedTemplate
+				}
+				// If RenderedTemplate is empty, maybe fallback to content?
+				// But DebugRenderOnly specifically targets template rendering.
+
+				if rendered != "" {
+					f, err := os.OpenFile("ollama_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err == nil {
+						defer f.Close()
+						fmt.Fprintf(f, "--- [Debug %s] ---\n%s\n\n", time.Now().Format(time.RFC3339), rendered)
+					}
+				}
+				return nil
+			})
 		}
 
 		err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {

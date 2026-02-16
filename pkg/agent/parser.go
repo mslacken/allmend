@@ -13,6 +13,8 @@ import (
 // We treat the file as a sequence of headers followed by lines of text.
 var agentLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Header", Pattern: `(?m)^%[a-zA-Z]+`},
+	{Name: "Comment", Pattern: `(?m)^\s*(?:#|//)[^\n]*`},
+	{Name: "BlockComment", Pattern: `(?s)/\*.*?\*/`},
 	{Name: "Line", Pattern: `(?m)^[^%\r\n].*$`}, // Matches any line that doesn't start with '%'
 	{Name: "Newline", Pattern: `\r?\n`},
 })
@@ -33,6 +35,7 @@ func ParseAgent(r io.Reader) (*Agent, error) {
 	// We do not elide Newline because we need it to preserve text structure in Manifests.
 	parser := participle.MustBuild[AgentFile](
 		participle.Lexer(agentLexer),
+		participle.Elide("Comment", "BlockComment"),
 	)
 
 	// Parse
