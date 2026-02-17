@@ -46,7 +46,7 @@ Some mission content.
 	// Execute the list command directly
 	// We can't easily call listCmd.Execute() because it's a sub-command.
 	// We can call listCmd.Run(listCmd, nil)
-	listCmd.Run(listCmd, []string{})
+	listCmd.RunE(listCmd, []string{})
 
 	// Restore stdout
 	w.Close()
@@ -71,7 +71,7 @@ func TestAgentListNoAgents(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	listCmd.Run(listCmd, []string{})
+	listCmd.RunE(listCmd, []string{})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -117,7 +117,7 @@ Some mission content.
 	defer listCmd.Flags().Set("format", originalFormat)
 
 	// Execute the list command
-	listCmd.Run(listCmd, []string{})
+	listCmd.RunE(listCmd, []string{})
 
 	// Restore stdout
 	w.Close()

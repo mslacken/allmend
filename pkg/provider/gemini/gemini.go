@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"google.golang.org/api/iterator"
 	"google.golang.org/genai"
 )
 
@@ -27,22 +26,12 @@ func New(ctx context.Context, config *genai.ClientConfig) (*Provider, error) {
 
 // GetModells returns a list of available models.
 func (p *Provider) GetModells(ctx context.Context) ([]string, error) {
-	it, err := p.client.Models.List(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list gemini models: %w", err)
-	}
-	
 	var models []string
-	for {
-		// New genai client iterators take ctx in Next()
-		m, err := it.Next(ctx)
-		if err == iterator.Done {
-			break
-		}
+	for m, err := range p.client.Models.All(ctx) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate gemini models: %w", err)
 		}
-		// Typically model names are like "models/gemini-pro"
+		
 		name := m.Name
 		if strings.HasPrefix(name, "models/") {
 			name = strings.TrimPrefix(name, "models/")

@@ -24,6 +24,14 @@ func (p Provider) GetConnection(ctx context.Context) (ProviderConnection, error)
 	case "google", "gemini":
 		cfg := &genai.ClientConfig{}
 
+		// Default to Gemini backend
+		cfg.Backend = genai.BackendGeminiAPI
+		if v, ok := p.Config["backend"].(string); ok {
+			if v == "vertex" {
+				cfg.Backend = genai.BackendVertexAI
+			}
+		}
+
 		if v, ok := p.Config["api_key"].(string); ok {
 			cfg.APIKey = v
 		}
@@ -31,13 +39,9 @@ func (p Provider) GetConnection(ctx context.Context) (ProviderConnection, error)
 			cfg.Project = v
 		}
 		if v, ok := p.Config["location"].(string); ok {
-			cfg.Location = v
-		}
-		if v, ok := p.Config["backend"].(string); ok {
-			if v == "vertex" {
-				cfg.Backend = genai.BackendVertexAI
-			} else {
-				cfg.Backend = genai.BackendGeminiAPI
+			// Location is only valid/required for Vertex AI
+			if cfg.Backend == genai.BackendVertexAI {
+				cfg.Location = v
 			}
 		}
 

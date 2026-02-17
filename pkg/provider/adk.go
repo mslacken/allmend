@@ -23,6 +23,14 @@ func (p Provider) CreateLLM(ctx context.Context, modelName string, modelConfig m
 	case "google", "gemini":
 		cfg := &genai.ClientConfig{}
 
+		// Default to Gemini backend
+		cfg.Backend = genai.BackendGeminiAPI
+		if v, ok := p.Config["backend"].(string); ok {
+			if v == "vertex" {
+				cfg.Backend = genai.BackendVertexAI
+			}
+		}
+
 		if v, ok := p.Config["api_key"].(string); ok {
 			cfg.APIKey = v
 		}
@@ -30,13 +38,8 @@ func (p Provider) CreateLLM(ctx context.Context, modelName string, modelConfig m
 			cfg.Project = v
 		}
 		if v, ok := p.Config["location"].(string); ok {
-			cfg.Location = v
-		}
-		if v, ok := p.Config["backend"].(string); ok {
-			if v == "vertex" {
-				cfg.Backend = genai.BackendVertexAI
-			} else {
-				cfg.Backend = genai.BackendGeminiAPI
+			if cfg.Backend == genai.BackendVertexAI {
+				cfg.Location = v
 			}
 		}
 
