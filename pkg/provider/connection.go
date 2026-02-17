@@ -20,7 +20,7 @@ func (p Provider) GetConnection(ctx context.Context) (ProviderConnection, error)
 		}
 		// We use a dummy model name because New requires it, but for listing models it might be ignored or we can use empty.
 		// However, ollama.New returns *Provider which has the client.
-		return ollama.New(endpoint, "")
+		return ollama.New(endpoint, "", nil)
 	case "google", "gemini":
 		cfg := &genai.ClientConfig{}
 

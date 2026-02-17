@@ -88,7 +88,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// 4. Create ADK LLM
-		llm, err := p.CreateLLM(ctx, modelName)
+		llm, err := p.CreateLLM(ctx, modelName, m.Config)
 		if err != nil {
 			return fmt.Errorf("Error creating LLM: %v\n", err)
 		}

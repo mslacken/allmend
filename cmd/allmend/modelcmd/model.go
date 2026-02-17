@@ -8,9 +8,10 @@ import (
 )
 
 var ModelCmd = &cobra.Command{
-	Use:   "model",
-	Short: "Manage AI models",
-	Long:  `Manage the available AI models for Allmend.`,
+	Use:     "model",
+	Aliases: []string{"modell"},
+	Short:   "Manage AI models",
+	Long:    `Manage the available AI models for Allmend.`,
 }
 
 // GetModelsFilePath determines the path to the models YAML file.

@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -20,10 +23,11 @@ var yieldErr = fmt.Errorf("yield stopped")
 type Provider struct {
 	client *api.Client
 	model  string
+	config map[string]interface{}
 }
 
 // New creates a new Ollama provider.
-func New(endpoint, modelName string) (*Provider, error) {
+func New(endpoint, modelName string, config map[string]interface{}) (*Provider, error) {
 	url, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ollama endpoint: %w", err)
@@ -34,6 +38,7 @@ func New(endpoint, modelName string) (*Provider, error) {
 	return &Provider{
 		client: client,
 		model:  modelName,
+		config: config,
 	}, nil
 }
 
@@ -87,6 +92,7 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			Model:    p.model,
 			Messages: messages,
 			Stream:   &stream,
+			Options:  p.config,
 		}
 
 		if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
@@ -154,4 +160,59 @@ func (p *Provider) GetModells(ctx context.Context) ([]string, error) {
 		models = append(models, m.Name)
 	}
 	return models, nil
+}
+
+// CheckModel checks if the model supports the given configuration.
+func (p *Provider) CheckModel(ctx context.Context, name string, config map[string]interface{}) ([]string, []string, error) {
+	_, err := p.client.Show(ctx, &api.ShowRequest{Name: name})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to show ollama model '%s': %w", name, err)
+	}
+
+	var warnings []string
+	var info []string
+	
+	// Dynamically build supported keys from api.Options struct tags
+	supportedKeys := make(map[string]bool)
+	var allValidKeys []string
+	val := reflect.TypeOf(api.Options{})
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		tag := field.Tag.Get("json")
+		if tag != "" {
+			// Extract the key name (before comma if any)
+			key := tag
+			if idx := strings.Index(tag, ","); idx != -1 {
+				key = tag[:idx]
+			}
+			supportedKeys[key] = true
+			allValidKeys = append(allValidKeys, key)
+		}
+	}
+	sort.Strings(allValidKeys)
+
+	for k := range config {
+		if !supportedKeys[k] {
+			warnings = append(warnings, fmt.Sprintf("Parameter '%s' is not a valid Ollama API parameter (must match exactly, e.g. 'temperature', 'top_k').", k))
+		}
+	}
+	
+	// Collect valid parameters that are NOT set in the config
+	var unsetParams []string
+	for _, key := range allValidKeys {
+		if _, set := config[key]; !set {
+			unsetParams = append(unsetParams, key)
+		}
+	}
+	
+	if len(unsetParams) > 0 {
+		info = append(info, "Available valid parameters (unset):")
+		// Format them nicely, maybe comma separated or just list them?
+		// Given there are many, a comma separated list might be better for "info" return
+		// or passing them as individual strings.
+		// Let's pass them individually for the caller to format.
+		info = append(info, unsetParams...)
+	}
+
+	return warnings, info, nil
 }

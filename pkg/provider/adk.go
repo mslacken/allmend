@@ -12,14 +12,14 @@ import (
 )
 
 // CreateLLM creates an ADK LLM provider from the configuration.
-func (p Provider) CreateLLM(ctx context.Context, modelName string) (model.LLM, error) {
+func (p Provider) CreateLLM(ctx context.Context, modelName string, modelConfig map[string]interface{}) (model.LLM, error) {
 	switch p.Type {
 	case "ollama":
 		endpoint := "http://localhost:11434"
 		if v, ok := p.Config["endpoint"].(string); ok {
 			endpoint = v
 		}
-		return ollama.New(endpoint, modelName)
+		return ollama.New(endpoint, modelName, modelConfig)
 	case "google", "gemini":
 		cfg := &genai.ClientConfig{}
 

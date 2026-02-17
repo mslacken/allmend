@@ -51,3 +51,10 @@ func (p *Provider) GetModells(ctx context.Context) ([]string, error) {
 	}
 	return models, nil
 }
+
+// CheckModel checks if the model supports the given configuration.
+func (p *Provider) CheckModel(ctx context.Context, name string, config map[string]interface{}) ([]string, []string, error) {
+	// For Gemini, we could fetch model details and check supported actions/features.
+	// For now, return empty warnings.
+	return nil, nil, nil
+}
