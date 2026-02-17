@@ -12,7 +12,7 @@ import (
 
 var runCmd = &cobra.Command{
 	Use:   "run [agent name]",
-	Short: "Run an agent in interactive mode",
+	Short: "Run an agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		agentName := args[0]
@@ -56,7 +56,8 @@ var runCmd = &cobra.Command{
 		targetAgent.ProvidersFilePath = providersPath
 
 		// 3. Run agent
-		if err := targetAgent.Run(ctx); err != nil {
+		chat, _ := cmd.Flags().GetBool("chat")
+		if err := targetAgent.Run(ctx, chat); err != nil {
 			return fmt.Errorf("Error running agent: %v\n", err)
 		}
 		return nil
@@ -65,5 +66,6 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.Flags().StringP("model", "m", "", "Model to use for the agent")
+	runCmd.Flags().BoolP("chat", "c", false, "Start an interactive chat session")
 	AgentCmd.AddCommand(runCmd)
 }

@@ -96,7 +96,25 @@ var checkCmd = &cobra.Command{
 		if found {
 			fmt.Printf("- Availability: OK (Model ID '%s' found in provider)\n", targetModelID)
 
-			// 5. Validation
+			// 5. API Options
+			opts, err := conn.GetSupportedOptions(ctx, targetModelID)
+			if err == nil && len(opts) > 0 {
+				fmt.Println("- API Options:")
+				currentLine := "  "
+				for _, opt := range opts {
+					if len(currentLine)+len(opt)+2 > 80 {
+						fmt.Println(currentLine[:len(currentLine)-2])
+						currentLine = "  " + opt + ", "
+					} else {
+						currentLine += opt + ", "
+					}
+				}
+				if len(currentLine) > 2 {
+					fmt.Println(currentLine[:len(currentLine)-2])
+				}
+			}
+
+			// 6. Validation
 			warnings, info, err := conn.CheckModel(ctx, targetModelID, m.Config)
 			if err != nil {
 				fmt.Printf("- Validation: Error checking model capabilities: %v\n", err)
@@ -147,7 +165,7 @@ var checkCmd = &cobra.Command{
 			// We don't exit here, we might still want to show config
 		}
 
-		// 6. Display Configuration
+		// 7. Display Configuration
 		fmt.Println("- Applied Configuration:")
 		if len(m.Config) == 0 {
 			fmt.Println("  (No specific configuration set)")

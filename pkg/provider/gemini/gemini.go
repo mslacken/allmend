@@ -47,3 +47,9 @@ func (p *Provider) CheckModel(ctx context.Context, name string, config map[strin
 	// For now, return empty warnings.
 	return nil, nil, nil
 }
+
+// GetSupportedOptions returns a list of supported configuration options for the model.
+func (p *Provider) GetSupportedOptions(ctx context.Context, name string) ([]string, error) {
+	// TODO: Implement for Gemini if possible
+	return nil, nil
+}

@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"net/http"
@@ -24,6 +25,7 @@ type Provider struct {
 	client *api.Client
 	model  string
 	config map[string]interface{}
+	ctxLen int
 }
 
 // New creates a new Ollama provider.
@@ -92,7 +94,72 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			Model:    p.model,
 			Messages: messages,
 			Stream:   &stream,
-			Options:  p.config,
+			Options:  make(map[string]interface{}),
+		}
+
+		// Map configuration to ChatRequest fields or Options
+		for k, v := range p.config {
+			switch k {
+			case "format":
+				if s, ok := v.(string); ok {
+					chatReq.Format = json.RawMessage(fmt.Sprintf("%q", s))
+				}
+			case "keep_alive":
+				if s, ok := v.(string); ok {
+					if d, err := time.ParseDuration(s); err == nil {
+						chatReq.KeepAlive = &api.Duration{Duration: d}
+					}
+				} else if f, ok := v.(float64); ok {
+					chatReq.KeepAlive = &api.Duration{Duration: time.Duration(f * float64(time.Second))}
+				}
+			case "think":
+				if b, ok := v.(bool); ok {
+					chatReq.Think = &api.ThinkValue{Value: b}
+				} else if s, ok := v.(string); ok {
+					chatReq.Think = &api.ThinkValue{Value: s}
+				}
+			case "truncate":
+				if b, ok := v.(bool); ok {
+					chatReq.Truncate = &b
+				}
+			case "shift":
+				if b, ok := v.(bool); ok {
+					chatReq.Shift = &b
+				}
+			case "logprobs":
+				if b, ok := v.(bool); ok {
+					chatReq.Logprobs = b
+				}
+			case "top_logprobs":
+				if i, ok := v.(int); ok {
+					chatReq.TopLogprobs = i
+				} else if f, ok := v.(float64); ok {
+					chatReq.TopLogprobs = int(f)
+				}
+			default:
+				chatReq.Options[k] = v
+			}
+		}
+
+		if _, ok := chatReq.Options["num_ctx"]; !ok {
+			if p.ctxLen == 0 {
+				if resp, err := p.client.Show(ctx, &api.ShowRequest{Name: p.model}); err == nil {
+					for _, k := range []string{"llama.context_length", "context_length"} {
+						if v, ok := resp.ModelInfo[k]; ok {
+							if f, ok := v.(float64); ok {
+								p.ctxLen = int(f)
+								break
+							} else if i, ok := v.(int); ok {
+								p.ctxLen = i
+								break
+							}
+						}
+					}
+				}
+			}
+			if p.ctxLen > 0 {
+				chatReq.Options["num_ctx"] = p.ctxLen
+			}
 		}
 
 		var debugSession string
@@ -191,34 +258,63 @@ func (p *Provider) CheckModel(ctx context.Context, name string, config map[strin
 		return nil, nil, fmt.Errorf("failed to show ollama model '%s': %w", name, err)
 	}
 
-	var warnings []string
-	var info []string
-	
-	// Dynamically build supported keys from api.Options struct tags
+	supportedKeys, allValidKeys := getSupportedOptions()
+	warnings, info := validateConfig(config, supportedKeys, allValidKeys)
+	return warnings, info, nil
+}
+
+// GetSupportedOptions returns a list of supported configuration options for the model.
+func (p *Provider) GetSupportedOptions(ctx context.Context, name string) ([]string, error) {
+	_, allValidKeys := getSupportedOptions()
+	return allValidKeys, nil
+}
+
+func getSupportedOptions() (map[string]bool, []string) {
 	supportedKeys := make(map[string]bool)
 	var allValidKeys []string
-	val := reflect.TypeOf(api.Options{})
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		tag := field.Tag.Get("json")
-		if tag != "" {
-			// Extract the key name (before comma if any)
-			key := tag
-			if idx := strings.Index(tag, ","); idx != -1 {
-				key = tag[:idx]
+
+	// Helper to extract JSON tags
+	extractTags := func(t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			tag := field.Tag.Get("json")
+			if tag != "" {
+				// Extract the key name (before comma if any)
+				key := tag
+				if idx := strings.Index(tag, ","); idx != -1 {
+					key = tag[:idx]
+				}
+				// Skip internal or non-configurable keys
+				if key == "-" || key == "model" || key == "messages" || key == "stream" || key == "tools" || key == "options" || strings.HasPrefix(key, "_") {
+					continue
+				}
+				if !supportedKeys[key] {
+					supportedKeys[key] = true
+					allValidKeys = append(allValidKeys, key)
+				}
 			}
-			supportedKeys[key] = true
-			allValidKeys = append(allValidKeys, key)
 		}
 	}
+
+	extractTags(reflect.TypeOf(api.Options{}))
+	extractTags(reflect.TypeOf(api.ChatRequest{}))
+
 	sort.Strings(allValidKeys)
+	return supportedKeys, allValidKeys
+}
+
+// validateConfig validates the configuration against valid Ollama API parameters.
+// It returns a list of warnings (for invalid parameters) and info (for valid but unset parameters).
+func validateConfig(config map[string]interface{}, supportedKeys map[string]bool, allValidKeys []string) ([]string, []string) {
+	var warnings []string
+	var info []string
 
 	for k := range config {
 		if !supportedKeys[k] {
 			warnings = append(warnings, fmt.Sprintf("Parameter '%s' is not a valid Ollama API parameter (must match exactly, e.g. 'temperature', 'top_k').", k))
 		}
 	}
-	
+
 	// Collect valid parameters that are NOT set in the config
 	var unsetParams []string
 	for _, key := range allValidKeys {
@@ -226,15 +322,11 @@ func (p *Provider) CheckModel(ctx context.Context, name string, config map[strin
 			unsetParams = append(unsetParams, key)
 		}
 	}
-	
+
 	if len(unsetParams) > 0 {
 		info = append(info, "Available valid parameters (unset):")
-		// Format them nicely, maybe comma separated or just list them?
-		// Given there are many, a comma separated list might be better for "info" return
-		// or passing them as individual strings.
-		// Let's pass them individually for the caller to format.
 		info = append(info, unsetParams...)
 	}
 
-	return warnings, info, nil
+	return warnings, info
 }

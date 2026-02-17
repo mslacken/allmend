@@ -39,8 +39,8 @@ func (u *SessionUsage) Print() {
 		u.Runtime.Round(time.Millisecond), u.Total, u.Prompt, u.Candidates)
 }
 
-// Run starts the interactive agent loop.
-func (agent *Agent) Run(ctx context.Context) error {
+// Run starts the agent. If chat is true, it enters an interactive loop.
+func (agent *Agent) Run(ctx context.Context, chat bool) error {
 	// 1. Load model config
 	if agent.ModelsFilePath == "" {
 		return fmt.Errorf("ModelsFilePath is not set")
@@ -107,16 +107,25 @@ func (agent *Agent) Run(ctx context.Context) error {
 
 	totalUsage := &SessionUsage{}
 
-	fmt.Printf("Agent '%s' initialized (using model '%s'). Type '/quit', '/q' or '/exit' to stop.\n", agent.Name, agent.RuntimeModel)
+	if chat {
+		fmt.Printf("Agent '%s' initialized (using model '%s'). Type '/quit', '/q' or '/exit' to stop.\n", agent.Name, agent.RuntimeModel)
+	}
 
 	// If there is an initial mission, send it first
 	if agent.Mission != nil && agent.Mission.Content != "" {
-		fmt.Printf("\nExecuting initial mission: %s\n", agent.Mission.Content)
+		if chat {
+			fmt.Printf("\nExecuting initial mission: %s\n", agent.Mission.Content)
+		}
 		usage, err := runOnce(ctx, agentRunner, session.Session.ID(), agent.Mission.Content)
 		if err != nil {
 			fmt.Printf("Error running mission: %v\n", err)
 		}
 		totalUsage.Add(usage)
+	}
+
+	if !chat {
+		totalUsage.Print()
+		return nil
 	}
 
 	// Handle graceful shutdown on Ctrl-C
