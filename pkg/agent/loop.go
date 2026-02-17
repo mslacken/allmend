@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/SUSE/allmend/pkg/model"
 	"github.com/SUSE/allmend/pkg/provider"
@@ -17,6 +18,26 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 )
+
+// SessionUsage tracks the total tokens and time used in a session.
+type SessionUsage struct {
+	Prompt     int32
+	Candidates int32
+	Total      int32
+	Runtime    time.Duration
+}
+
+func (u *SessionUsage) Add(other SessionUsage) {
+	u.Prompt += other.Prompt
+	u.Candidates += other.Candidates
+	u.Total += other.Total
+	u.Runtime += other.Runtime
+}
+
+func (u *SessionUsage) Print() {
+	fmt.Printf("Total Runtime: %v | Total Tokens: %d (Prompt: %d, Candidates: %d)\n",
+		u.Runtime.Round(time.Millisecond), u.Total, u.Prompt, u.Candidates)
+}
 
 // Run starts the interactive agent loop.
 func (agent *Agent) Run(ctx context.Context) error {
@@ -84,14 +105,18 @@ func (agent *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create runner: %w", err)
 	}
 
+	totalUsage := &SessionUsage{}
+
 	fmt.Printf("Agent '%s' initialized (using model '%s'). Type '/quit', '/q' or '/exit' to stop.\n", agent.Name, agent.RuntimeModel)
 
 	// If there is an initial mission, send it first
 	if agent.Mission != nil && agent.Mission.Content != "" {
 		fmt.Printf("\nExecuting initial mission: %s\n", agent.Mission.Content)
-		if err := runOnce(ctx, agentRunner, session.Session.ID(), agent.Mission.Content); err != nil {
+		usage, err := runOnce(ctx, agentRunner, session.Session.ID(), agent.Mission.Content)
+		if err != nil {
 			fmt.Printf("Error running mission: %v\n", err)
 		}
+		totalUsage.Add(usage)
 	}
 
 	// Handle graceful shutdown on Ctrl-C
@@ -122,6 +147,7 @@ func (agent *Agent) Run(ctx context.Context) error {
 					fmt.Print(">>> ") // Reprint prompt
 				} else {
 					fmt.Println("\nExiting...")
+					totalUsage.Print()
 					os.Exit(0)
 				}
 			}
@@ -144,10 +170,20 @@ func (agent *Agent) Run(ctx context.Context) error {
 			break
 		}
 
-		if err := runOnce(ctx, agentRunner, session.Session.ID(), text); err != nil {
+		// Handle usage commands
+		if text == "/usage" || text == "/tokens" {
+			totalUsage.Print()
+			continue
+		}
+
+		usage, err := runOnce(ctx, agentRunner, session.Session.ID(), text)
+		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
+		totalUsage.Add(usage)
 	}
+
+	totalUsage.Print()
 
 	if err := scanner.Err(); err != nil {
 		// Ignore error caused by closing stdin on exit
@@ -159,13 +195,21 @@ func (agent *Agent) Run(ctx context.Context) error {
 	return nil
 }
 
-func runOnce(ctx context.Context, agentRunner *runner.Runner, sessionID string, text string) error {
+func runOnce(ctx context.Context, agentRunner *runner.Runner, sessionID string, text string) (SessionUsage, error) {
+	startTime := time.Now()
+	var usage SessionUsage
+
 	for event, err := range agentRunner.Run(ctx, "user", sessionID,
 		genai.NewContentFromText(text, genai.RoleUser), adkagent.RunConfig{
 			StreamingMode: adkagent.StreamingModeNone,
 		}) {
 		if err != nil {
-			return err
+			return usage, err
+		}
+		if event.UsageMetadata != nil {
+			usage.Prompt += event.UsageMetadata.PromptTokenCount
+			usage.Candidates += event.UsageMetadata.CandidatesTokenCount
+			usage.Total += event.UsageMetadata.TotalTokenCount
 		}
 		if event.Content != nil {
 			for _, part := range event.Content.Parts {
@@ -176,5 +220,6 @@ func runOnce(ctx context.Context, agentRunner *runner.Runner, sessionID string, 
 		}
 	}
 	fmt.Println()
-	return nil
+	usage.Runtime = time.Since(startTime)
+	return usage, nil
 }

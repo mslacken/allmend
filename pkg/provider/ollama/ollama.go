@@ -95,32 +95,34 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			Options:  p.config,
 		}
 
+		var debugSession string
+		var newInput string
 		if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
+			if len(req.Contents) > 0 {
+				last := req.Contents[len(req.Contents)-1]
+				for _, part := range last.Parts {
+					if part.Text != "" {
+						newInput += part.Text
+					}
+				}
+			}
+
 			debugReq := *chatReq
 			debugReq.DebugRenderOnly = true
 			streamFalse := false
 			debugReq.Stream = &streamFalse
 
 			_ = p.client.Chat(ctx, &debugReq, func(resp api.ChatResponse) error {
-				var rendered string
 				if resp.DebugInfo != nil {
-					rendered = resp.DebugInfo.RenderedTemplate
-				}
-				// If RenderedTemplate is empty, maybe fallback to content?
-				// But DebugRenderOnly specifically targets template rendering.
-
-				if rendered != "" {
-					f, err := os.OpenFile("ollama_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-					if err == nil {
-						defer f.Close()
-						fmt.Fprintf(f, "--- [Debug %s] ---\n%s\n\n", time.Now().Format(time.RFC3339), rendered)
-					}
+					debugSession = resp.DebugInfo.RenderedTemplate
 				}
 				return nil
 			})
 		}
 
+		var fullOutput string
 		err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {
+			fullOutput += resp.Message.Content
 			llmResp := &model.LLMResponse{
 				Content: &genai.Content{
 					Role: "model",
@@ -134,6 +136,26 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 
 			if resp.Done {
 				llmResp.FinishReason = genai.FinishReasonStop
+				llmResp.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+					PromptTokenCount:     int32(resp.PromptEvalCount),
+					CandidatesTokenCount: int32(resp.EvalCount),
+					TotalTokenCount:      int32(resp.PromptEvalCount + resp.EvalCount),
+				}
+
+				if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
+					f, err := os.OpenFile("ollama_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err == nil {
+						defer f.Close()
+						fmt.Fprintf(f, "--- [Debug %s] ---\nInput: %s\n\nSession:\n%s\n\nOutput: %s\n\nTokens: Prompt=%d, Eval=%d\n\n",
+							time.Now().Format(time.RFC3339),
+							newInput,
+							debugSession,
+							fullOutput,
+							resp.PromptEvalCount,
+							resp.EvalCount,
+						)
+					}
+				}
 			}
 
 			if !yield(llmResp, nil) {
