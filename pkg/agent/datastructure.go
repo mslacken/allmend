@@ -70,3 +70,17 @@ type AgentMeta struct {
 	// semantic version
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 }
+
+// DisplayFile holds the parsed tokens of an agent file for display purposes.
+type DisplayFile struct {
+	Tokens []Token
+}
+
+// Token represents a single parsed token from an agent file.
+type Token struct {
+	Comment      *string
+	BlockComment *string
+	Header       *string
+	Line         *string
+	Newline      *string
+}

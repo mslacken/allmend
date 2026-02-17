@@ -101,3 +101,41 @@ func parseMetaLines(content string, agent *Agent) {
 		}
 	}
 }
+
+// ParseFileForDisplay takes an io.Reader and tokenizes it for display.
+func ParseFileForDisplay(r io.Reader) (*DisplayFile, error) {
+	bytes, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading failed: %w", err)
+	}
+	content := string(bytes)
+
+	lex, err := agentLexer.Lex("", strings.NewReader(content))
+	if err != nil {
+		return nil, fmt.Errorf("lexing failed: %w", err)
+	}
+
+	tokens, err := lexer.ConsumeAll(lex)
+	if err != nil {
+		return nil, fmt.Errorf("consuming tokens failed: %w", err)
+	}
+
+	var displayTokens []Token
+	for _, t := range tokens {
+		val := t.Value
+		switch t.Type {
+		case agentLexer.Symbols()["Comment"]:
+			displayTokens = append(displayTokens, Token{Comment: &val})
+		case agentLexer.Symbols()["BlockComment"]:
+			displayTokens = append(displayTokens, Token{BlockComment: &val})
+		case agentLexer.Symbols()["Header"]:
+			displayTokens = append(displayTokens, Token{Header: &val})
+		case agentLexer.Symbols()["Line"]:
+			displayTokens = append(displayTokens, Token{Line: &val})
+		case agentLexer.Symbols()["Newline"]:
+			displayTokens = append(displayTokens, Token{Newline: &val})
+		}
+	}
+
+	return &DisplayFile{Tokens: displayTokens}, nil
+}

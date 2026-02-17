@@ -140,28 +140,6 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				chatReq.Options[k] = v
 			}
 		}
-
-		if _, ok := chatReq.Options["num_ctx"]; !ok {
-			if p.ctxLen == 0 {
-				if resp, err := p.client.Show(ctx, &api.ShowRequest{Name: p.model}); err == nil {
-					for _, k := range []string{"llama.context_length", "context_length"} {
-						if v, ok := resp.ModelInfo[k]; ok {
-							if f, ok := v.(float64); ok {
-								p.ctxLen = int(f)
-								break
-							} else if i, ok := v.(int); ok {
-								p.ctxLen = i
-								break
-							}
-						}
-					}
-				}
-			}
-			if p.ctxLen > 0 {
-				chatReq.Options["num_ctx"] = p.ctxLen
-			}
-		}
-
 		var debugSession string
 		var newInput string
 		if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
@@ -200,6 +178,7 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				// Map other fields as best as possible
 				TurnComplete: resp.Done,
 			}
+			fmt.Printf("Reason: %s\n", resp.DoneReason)
 
 			if resp.Done {
 				llmResp.FinishReason = genai.FinishReasonStop
