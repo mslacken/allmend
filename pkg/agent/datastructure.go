@@ -16,6 +16,12 @@ type Agent struct {
 	Tools *AgentTools `json:"tools,omitempty" yaml:"tools,omitempty"`
 	// metdata of the agent
 	Meta *AgentMeta `json:"meta,omitempty" yaml:"meta,omitempty"`
+	// RuntimeModel is the name of the model to use for the agent
+	RuntimeModel string `json:"-" yaml:"-"`
+	// ModelsFilePath is the path to the models configuration file
+	ModelsFilePath string `json:"-" yaml:"-"`
+	// ProvidersFilePath is the path to the providers configuration file
+	ProvidersFilePath string `json:"-" yaml:"-"`
 }
 
 type AgentManifest struct {
