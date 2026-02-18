@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/SUSE/allmend/pkg/model"
 	"github.com/SUSE/allmend/pkg/provider"
+	"github.com/SUSE/allmend/pkg/tool"
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
+	adktool "google.golang.org/adk/tool"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -78,11 +81,41 @@ func (agent *Agent) Run(ctx context.Context, chat bool) error {
 		return fmt.Errorf("error creating LLM: %w", err)
 	}
 
+	// Load Tools
+	// We need to determine tools file path similar to other configs.
+	// For now, let's assume standard location or reuse logic if available.
+	// But agent struct doesn't have ToolsFilePath.
+	// We can use viper or default location.
+	// Let's assume standard location "config/tools.conf" relative to base if not provided.
+	// Or maybe inject it?
+	// For now, let's try to load from standard location.
+	toolsPath := "config/tools.conf" // Fallback
+	if agent.ModelsFilePath != "" {
+		// Try to deduce from models path
+		dir := filepath.Dir(agent.ModelsFilePath)
+		toolsPath = filepath.Join(dir, "tools.conf")
+	}
+
+	toolStore, err := tool.Load(toolsPath)
+	if err != nil {
+		// Log warning or just continue without tools?
+		fmt.Printf("Warning: Failed to load tools from %s: %v\n", toolsPath, err)
+	}
+	
+	var agentTools []adktool.Tool
+	if toolStore != nil {
+		agentTools, err = LoadTools(agent, toolStore)
+		if err != nil {
+			fmt.Printf("Warning: Failed to load agent tools: %v\n", err)
+		}
+	}
+
 	// 4. Create ADK Agent
 	adkAgent, err := llmagent.New(llmagent.Config{
 		Model:       llm,
 		Instruction: agent.Manifest.Content,
 		Name:        agent.Name,
+		Tools:       agentTools,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating ADK agent: %w", err)

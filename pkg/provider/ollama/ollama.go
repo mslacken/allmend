@@ -178,7 +178,7 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				// Map other fields as best as possible
 				TurnComplete: resp.Done,
 			}
-			fmt.Printf("Reason: %s\n", resp.DoneReason)
+
 
 			if resp.Done {
 				llmResp.FinishReason = genai.FinishReasonStop
@@ -202,6 +202,13 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 						)
 					}
 				}
+			}
+
+			if resp.DoneReason == "length" {
+				if !yield(nil, fmt.Errorf("context overrun")) {
+					return yieldErr
+				}
+				return nil
 			}
 
 			if !yield(llmResp, nil) {

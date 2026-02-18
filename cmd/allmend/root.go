@@ -8,6 +8,7 @@ import (
 	"github.com/SUSE/allmend/cmd/allmend/agentcmd"
 	"github.com/SUSE/allmend/cmd/allmend/modelcmd"
 	"github.com/SUSE/allmend/cmd/allmend/providercmd"
+	"github.com/SUSE/allmend/cmd/allmend/toolcmd"
 	"github.com/SUSE/allmend/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -39,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(agentcmd.AgentCmd)
 	rootCmd.AddCommand(modelcmd.ModelCmd)
 	rootCmd.AddCommand(providercmd.ProviderCmd)
+	rootCmd.AddCommand(toolcmd.ToolCmd)
 }
 
 // initConfig reads in config file and ENV variables if set.
