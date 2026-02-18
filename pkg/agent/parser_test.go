@@ -48,3 +48,39 @@ And an empty line.`
 		t.Errorf("Mission content mismatch. Got: %q", agent.Mission.Content)
 	}
 }
+
+func TestParseAgentTools(t *testing.T) {
+	agt := `%Meta
+Name: ToolAgent
+%Tools
+%Required
+tool1
+tool2
+%Recommended
+tool3
+`
+	r := strings.NewReader(agt)
+	agent, err := ParseAgent(r)
+	if err != nil {
+		t.Fatalf("ParseAgent failed: %v", err)
+	}
+
+	if len(agent.Tools.Required) != 2 {
+		t.Errorf("Expected 2 required tools, got %d", len(agent.Tools.Required))
+	} else {
+		if agent.Tools.Required[0].Name != "tool1" {
+			t.Errorf("Expected first tool 'tool1', got '%s'", agent.Tools.Required[0].Name)
+		}
+		if agent.Tools.Required[1].Name != "tool2" {
+			t.Errorf("Expected second tool 'tool2', got '%s'", agent.Tools.Required[1].Name)
+		}
+	}
+
+	if len(agent.Tools.Recommended) != 1 {
+		t.Errorf("Expected 1 recommended tool, got %d", len(agent.Tools.Recommended))
+	} else {
+		if agent.Tools.Recommended[0].Name != "tool3" {
+			t.Errorf("Expected recommended tool 'tool3', got '%s'", agent.Tools.Recommended[0].Name)
+		}
+	}
+}

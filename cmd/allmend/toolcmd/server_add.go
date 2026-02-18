@@ -39,16 +39,26 @@ For Stdio servers:
 		if len(args) >= 2 {
 			name = args[0]
 			connectionStr = args[1]
-		} else {
-			// Infer name from URL if possible, otherwise error
-			connectionStr = args[0]
-			if serverType == "http" {
-				// Use full URL as default name to ensure uniqueness and backward compatibility
-				name = connectionStr
+		} else if len(args) == 1 {
+			if serverType == "stdio" && serverCommand != "" {
+				// If --command is provided, the positional arg is the name
+				name = args[0]
+				connectionStr = serverCommand
 			} else {
-				fmt.Println("Error: Please provide a name for the server.")
-				return
+				// Otherwise positional arg is the connection string (URL or command)
+				connectionStr = args[0]
+				if serverType == "http" {
+					name = connectionStr
+				} else {
+					// For stdio without --command, use command as name
+					name = connectionStr
+				}
 			}
+		}
+
+		if name == "" && serverType == "stdio" && serverCommand != "" {
+			fmt.Println("Error: Please provide a name for the server as a positional argument.")
+			return
 		}
 
 		// Configure Transport

@@ -35,14 +35,18 @@ func TestToolList(t *testing.T) {
 	t.Run("DefaultLocation", func(t *testing.T) {
 		// Create tools map
 		servers := map[string]tool.Server{
-			"http://server1": {
-				URL: "http://server1",
+			"server1": {
+				Name: "server1",
+				Type: "http",
+				URL: "http://example.com/api",
 				Tools: []tool.Tool{
 					{Name: "tool1", Description: "Tool 1"},
 				},
 			},
-			"http://server2": {
-				URL: "http://server2",
+			"server2": {
+				Name: "server2",
+				Type: "stdio",
+				Command: []string{"npx", "server"},
 				Tools: []tool.Tool{
 					{Name: "tool2", Description: "Tool 2"},
 				},
@@ -65,15 +69,31 @@ func TestToolList(t *testing.T) {
 			listCmd.Run(listCmd, []string{})
 		})
 
+		// Check headers
+		assert.Contains(t, output, "NAME")
+		assert.Contains(t, output, "SERVER")
+		assert.Contains(t, output, "TYPE")
+		assert.Contains(t, output, "COMMAND/URL")
+		
+		// Check tool 1
 		assert.Contains(t, output, "tool1")
-		assert.Contains(t, output, "tool2")
+		assert.Contains(t, output, "server1")
+		assert.Contains(t, output, "http")
+		assert.Contains(t, output, "http://example.com/api")
 		assert.Contains(t, output, "Tool 1")
+		
+		// Check tool 2
+		assert.Contains(t, output, "tool2")
+		assert.Contains(t, output, "server2")
+		assert.Contains(t, output, "stdio")
+		assert.Contains(t, output, "npx server")
 		assert.Contains(t, output, "Tool 2")
 	})
 
 	t.Run("ExplicitPath", func(t *testing.T) {
 		servers := map[string]tool.Server{
 			"custom/server": {
+				Name: "custom-server",
 				URL: "custom/server",
 				Tools: []tool.Tool{
 					{Name: "customtool", Description: "Custom Path Tool"},
@@ -100,5 +120,6 @@ func TestToolList(t *testing.T) {
 
 		assert.Contains(t, output, "customtool")
 		assert.Contains(t, output, "Custom Path Tool")
+		assert.Contains(t, output, "custom-server")
 	})
 }

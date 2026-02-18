@@ -72,11 +72,27 @@ func ParseAgent(r io.Reader) (*Agent, error) {
 		case "Description":
 			agent.Description = content
 		case "Tools":
-			// Placeholder
+			// Container header, ignore or handle if it has content
+		case "Required":
+			agent.Tools.Required = append(agent.Tools.Required, parseTools(content)...)
+		case "Recommended":
+			agent.Tools.Recommended = append(agent.Tools.Recommended, parseTools(content)...)
 		}
 	}
 
 	return agent, nil
+}
+
+func parseTools(content string) []*MCPTools {
+	var tools []*MCPTools
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			tools = append(tools, &MCPTools{Name: name})
+		}
+	}
+	return tools
 }
 
 func parseMetaLines(content string, agent *Agent) {

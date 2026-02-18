@@ -7,7 +7,6 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -15,10 +14,15 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"google.golang.org/adk/model"
+	adktool "google.golang.org/adk/tool"
 	"google.golang.org/genai"
 )
 
 var yieldErr = fmt.Errorf("yield stopped")
+
+type runnableTool interface {
+	Run(ctx adktool.Context, args any) (map[string]any, error)
+}
 
 // Provider implements the model.LLM interface for Ollama.
 type Provider struct {
@@ -90,136 +94,229 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			})
 		}
 
-		chatReq := &api.ChatRequest{
-			Model:    p.model,
-			Messages: messages,
-			Stream:   &stream,
-			Options:  make(map[string]interface{}),
-		}
+		// Configure Options once
+		options := make(map[string]interface{})
+		var format json.RawMessage
+		var keepAlive *api.Duration
+		var think *api.ThinkValue
+		var truncate, shift, logprobs *bool
+		var topLogprobs int
 
-		// Map configuration to ChatRequest fields or Options
 		for k, v := range p.config {
 			switch k {
 			case "format":
 				if s, ok := v.(string); ok {
-					chatReq.Format = json.RawMessage(fmt.Sprintf("%q", s))
+					format = json.RawMessage(fmt.Sprintf("%q", s))
 				}
 			case "keep_alive":
 				if s, ok := v.(string); ok {
 					if d, err := time.ParseDuration(s); err == nil {
-						chatReq.KeepAlive = &api.Duration{Duration: d}
+						keepAlive = &api.Duration{Duration: d}
 					}
 				} else if f, ok := v.(float64); ok {
-					chatReq.KeepAlive = &api.Duration{Duration: time.Duration(f * float64(time.Second))}
+					keepAlive = &api.Duration{Duration: time.Duration(f * float64(time.Second))}
 				}
 			case "think":
 				if b, ok := v.(bool); ok {
-					chatReq.Think = &api.ThinkValue{Value: b}
+					think = &api.ThinkValue{Value: b}
 				} else if s, ok := v.(string); ok {
-					chatReq.Think = &api.ThinkValue{Value: s}
+					think = &api.ThinkValue{Value: s}
 				}
 			case "truncate":
 				if b, ok := v.(bool); ok {
-					chatReq.Truncate = &b
+					truncate = &b
 				}
 			case "shift":
 				if b, ok := v.(bool); ok {
-					chatReq.Shift = &b
+					shift = &b
 				}
 			case "logprobs":
 				if b, ok := v.(bool); ok {
-					chatReq.Logprobs = b
+					logprobs = &b
 				}
 			case "top_logprobs":
 				if i, ok := v.(int); ok {
-					chatReq.TopLogprobs = i
+					topLogprobs = i
 				} else if f, ok := v.(float64); ok {
-					chatReq.TopLogprobs = int(f)
+					topLogprobs = int(f)
 				}
 			default:
-				chatReq.Options[k] = v
+				options[k] = v
 			}
 		}
-		var debugSession string
-		var newInput string
-		if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
-			if len(req.Contents) > 0 {
-				last := req.Contents[len(req.Contents)-1]
-				for _, part := range last.Parts {
-					if part.Text != "" {
-						newInput += part.Text
+
+		var tools []api.Tool
+		if req.Config != nil && len(req.Config.Tools) > 0 {
+			for _, t := range req.Config.Tools {
+				for _, fd := range t.FunctionDeclarations {
+					schemaMap := schemaToMap(fd.Parameters)
+					data, err := json.Marshal(schemaMap)
+					if err != nil {
+						yield(nil, fmt.Errorf("failed to marshal tool parameters: %w", err))
+						return
 					}
+					var params api.ToolFunctionParameters
+					if err := json.Unmarshal(data, &params); err != nil {
+						yield(nil, fmt.Errorf("failed to unmarshal tool parameters to ollama struct: %w", err))
+						return
+					}
+
+					tools = append(tools, api.Tool{
+						Type: "function",
+						Function: api.ToolFunction{
+							Name:        fd.Name,
+							Description: fd.Description,
+							Parameters:  params,
+						},
+					})
 				}
 			}
+		}
 
-			debugReq := *chatReq
-			debugReq.DebugRenderOnly = true
-			streamFalse := false
-			debugReq.Stream = &streamFalse
+		// Loop for tool execution
+		maxTurns := 10 // Safety limit
+		for turn := 0; turn < maxTurns; turn++ {
+			chatReq := &api.ChatRequest{
+				Model:       p.model,
+				Messages:    messages,
+				Stream:      &stream,
+				Format:      format,
+				KeepAlive:   keepAlive,
+				Think:       think,
+				Truncate:    truncate,
+				Shift:       shift,
+				Logprobs:    logprobs != nil && *logprobs,
+				TopLogprobs: topLogprobs,
+				Options:     options,
+				Tools:       tools,
+			}
 
-			_ = p.client.Chat(ctx, &debugReq, func(resp api.ChatResponse) error {
-				if resp.DebugInfo != nil {
-					debugSession = resp.DebugInfo.RenderedTemplate
+			var fullOutput string
+			var toolCalls []api.ToolCall
+			
+			// Track if we yielded anything in this turn
+			yieldedContent := false
+
+			err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {
+				fullOutput += resp.Message.Content
+				
+				// Collect tool calls
+				if len(resp.Message.ToolCalls) > 0 {
+					toolCalls = append(toolCalls, resp.Message.ToolCalls...)
 				}
+
+				llmResp := &model.LLMResponse{
+					Content: &genai.Content{
+						Role: "model",
+						Parts: []*genai.Part{},
+					},
+					// We only mark TurnComplete if we are done AND have no tool calls to process locally
+					TurnComplete: resp.Done && len(resp.Message.ToolCalls) == 0, 
+				}
+
+				// Handle Thinking
+				if resp.Message.Thinking != "" {
+					llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: fmt.Sprintf("<thinking>%s</thinking>", resp.Message.Thinking)})
+				}
+
+				if resp.Message.Content != "" {
+					llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: resp.Message.Content})
+				}
+
+				// Only yield if we have content or if we are done and have nothing else.
+				// If we have tool calls, we assume we will handle them and yield subsequent results.
+				// However, the caller might want to see the partial text.
+				
+				if len(llmResp.Content.Parts) > 0 {
+					yieldedContent = true
+					if !yield(llmResp, nil) {
+						return yieldErr
+					}
+				}
+				
+				if resp.DoneReason == "length" {
+					if !yield(nil, fmt.Errorf("context overrun")) {
+						return yieldErr
+					}
+					return nil
+				}
+
 				return nil
 			})
-		}
 
-		var fullOutput string
-		err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {
-			fullOutput += resp.Message.Content
-			llmResp := &model.LLMResponse{
-				Content: &genai.Content{
-					Role: "model",
-					Parts: []*genai.Part{
-						{Text: resp.Message.Content},
-					},
-				},
-				// Map other fields as best as possible
-				TurnComplete: resp.Done,
+			if err != nil {
+				if err == yieldErr {
+					return
+				}
+				yield(nil, err)
+				return
 			}
 
+			// If no tool calls, we are done
+			if len(toolCalls) == 0 {
+				if !yieldedContent {
+					// Yield at least one empty response to signal completion if nothing was streamed
+					yield(&model.LLMResponse{
+						Content: &genai.Content{Role: "model"}, 
+						TurnComplete: true,
+					}, nil)
+				}
+				return
+			}
 
-			if resp.Done {
-				llmResp.FinishReason = genai.FinishReasonStop
-				llmResp.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
-					PromptTokenCount:     int32(resp.PromptEvalCount),
-					CandidatesTokenCount: int32(resp.EvalCount),
-					TotalTokenCount:      int32(resp.PromptEvalCount + resp.EvalCount),
+			// Add assistant message with tool calls to history for next turn
+			messages = append(messages, api.Message{
+				Role:      "assistant",
+				Content:   fullOutput,
+				ToolCalls: toolCalls,
+			})
+
+			// Execute tools
+			for _, tc := range toolCalls {
+				var argsMap map[string]any
+				data, err := json.Marshal(tc.Function.Arguments)
+				if err == nil {
+					_ = json.Unmarshal(data, &argsMap)
 				}
 
-				if os.Getenv("ALLMEND_DEBUG_OLLAMA") != "" {
-					f, err := os.OpenFile("ollama_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-					if err == nil {
-						defer f.Close()
-						fmt.Fprintf(f, "--- [Debug %s] ---\nInput: %s\n\nSession:\n%s\n\nOutput: %s\n\nTokens: Prompt=%d, Eval=%d\n\n",
-							time.Now().Format(time.RFC3339),
-							newInput,
-							debugSession,
-							fullOutput,
-							resp.PromptEvalCount,
-							resp.EvalCount,
-						)
+				toolName := tc.Function.Name
+				var toolResult string
+				
+				if tObj, ok := req.Tools[toolName]; ok {
+					if tool, ok := tObj.(runnableTool); ok {
+						// Execute
+						res, err := tool.Run(nil, argsMap) // context nil as discussed
+						if err != nil {
+							toolResult = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
+						} else {
+							// Serialize result
+							// If result has "content" key (from MCP), use it.
+							if c, ok := res["content"]; ok {
+								toolResult = fmt.Sprintf("%v", c)
+							} else {
+								// Fallback JSON dump
+								resBytes, _ := json.Marshal(res)
+								toolResult = string(resBytes)
+							}
+						}
+					} else {
+						toolResult = fmt.Sprintf("Tool %s is not executable (does not implement Run)", toolName)
 					}
+				} else {
+					toolResult = fmt.Sprintf("Tool %s not found", toolName)
 				}
-			}
 
-			if resp.DoneReason == "length" {
-				if !yield(nil, fmt.Errorf("context overrun")) {
-					return yieldErr
-				}
-				return nil
+				// Append tool result to history
+				messages = append(messages, api.Message{
+					Role:    "tool",
+					Content: toolResult,
+				})
 			}
-
-			if !yield(llmResp, nil) {
-				return yieldErr
-			}
-			return nil
-		})
-
-		if err != nil && err != yieldErr {
-			yield(nil, err)
+			
+			// Loop continues to next turn with updated messages
 		}
+		
+		yield(nil, fmt.Errorf("max turns exceeded"))
 	}
 }
 
@@ -315,4 +412,50 @@ func validateConfig(config map[string]interface{}, supportedKeys map[string]bool
 	}
 
 	return warnings, info
+}
+
+func schemaToMap(s *genai.Schema) map[string]interface{} {
+	if s == nil {
+		return map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}
+	}
+
+	m := schemaToMapRecursive(s)
+	// Ensure root has type object if missing (though usually it is)
+	if _, ok := m["type"]; !ok {
+		m["type"] = "object"
+	}
+	return m
+}
+
+func schemaToMapRecursive(s *genai.Schema) map[string]interface{} {
+	if s == nil {
+		return nil
+	}
+	m := make(map[string]interface{})
+	if s.Type != "" {
+		m["type"] = string(s.Type)
+	}
+	if s.Description != "" {
+		m["description"] = s.Description
+	}
+	if len(s.Enum) > 0 {
+		m["enum"] = s.Enum
+	}
+	if s.Items != nil {
+		m["items"] = schemaToMapRecursive(s.Items)
+	}
+	if len(s.Properties) > 0 {
+		props := make(map[string]interface{})
+		for k, v := range s.Properties {
+			props[k] = schemaToMapRecursive(v)
+		}
+		m["properties"] = props
+	}
+	if len(s.Required) > 0 {
+		m["required"] = s.Required
+	}
+	return m
 }

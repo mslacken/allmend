@@ -3,17 +3,21 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/SUSE/allmend/pkg/mcp"
 	"github.com/SUSE/allmend/pkg/tool"
+	adkmodel "google.golang.org/adk/model"
 	adktool "google.golang.org/adk/tool"
+	"google.golang.org/genai"
 )
 
 // MCPTool implements adktool.Tool for an MCP tool.
 type MCPTool struct {
 	name        string
 	description string
+	inputSchema any
 	client      *mcp.Client
 }
 
@@ -29,13 +33,128 @@ func (t *MCPTool) IsLongRunning() bool {
 	return false
 }
 
+// Declaration returns the FunctionDeclaration for the tool.
+// This allows the tool to be recognized as a FunctionTool by the ADK runner.
+func (t *MCPTool) Declaration() *genai.FunctionDeclaration {
+	decl := &genai.FunctionDeclaration{
+		Name:        t.name,
+		Description: t.description,
+	}
+
+	if t.inputSchema != nil {
+		if schemaMap, ok := t.inputSchema.(map[string]any); ok {
+			schema, err := mapToGenaiSchema(schemaMap)
+			if err != nil {
+				// Log warning? We can't return error here.
+				fmt.Fprintf(os.Stderr, "Warning: failed to convert schema for tool %s: %v\n", t.name, err)
+			} else {
+				decl.Parameters = schema
+			}
+		}
+	}
+	return decl
+}
+
+// ProcessRequest registers the tool with the LLM request.
+// This implements the toolinternal.RequestProcessor interface required by ADK.
+func (t *MCPTool) ProcessRequest(ctx adktool.Context, req *adkmodel.LLMRequest) error {
+	decl := t.Declaration()
+
+	// Add to request config
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	
+	// Check if we already have a Tool with FunctionDeclarations
+	var funcTool *genai.Tool
+	for _, gt := range req.Config.Tools {
+		if gt.FunctionDeclarations != nil {
+			funcTool = gt
+			break
+		}
+	}
+	
+	if funcTool == nil {
+		funcTool = &genai.Tool{}
+		req.Config.Tools = append(req.Config.Tools, funcTool)
+	}
+	
+	funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
+	
+	// Also register this tool instance in req.Tools so the runner can find it to execute
+	if req.Tools == nil {
+		req.Tools = make(map[string]any)
+	}
+	req.Tools[t.name] = t
+
+	return nil
+}
+
+func mapToGenaiSchema(m map[string]any) (*genai.Schema, error) {
+	s := &genai.Schema{}
+	
+	if t, ok := m["type"].(string); ok {
+		s.Type = genai.Type(t)
+	}
+	
+	if desc, ok := m["description"].(string); ok {
+		s.Description = desc
+	}
+	
+	if props, ok := m["properties"].(map[string]any); ok {
+		s.Properties = make(map[string]*genai.Schema)
+		for k, v := range props {
+			if vMap, ok := v.(map[string]any); ok {
+				propSchema, err := mapToGenaiSchema(vMap)
+				if err != nil {
+					return nil, err
+				}
+				s.Properties[k] = propSchema
+			}
+		}
+	}
+	
+	if items, ok := m["items"].(map[string]any); ok {
+		itemSchema, err := mapToGenaiSchema(items)
+		if err != nil {
+			return nil, err
+		}
+		s.Items = itemSchema
+	}
+	
+	if req, ok := m["required"].([]any); ok {
+		for _, r := range req {
+			if rStr, ok := r.(string); ok {
+				s.Required = append(s.Required, rStr)
+			}
+		}
+	}
+	
+	// Handle enum?
+	if enum, ok := m["enum"].([]any); ok {
+		for _, e := range enum {
+			if eStr, ok := e.(string); ok {
+				s.Enum = append(s.Enum, eStr)
+			}
+		}
+	}
+
+	return s, nil
+}
+
+
 // Run executes the tool via MCP.
-func (t *MCPTool) Run(ctx adktool.Context, args map[string]any) (map[string]any, error) {
+func (t *MCPTool) Run(ctx adktool.Context, args any) (map[string]any, error) {
+	argsMap, ok := args.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected map[string]any args, got %T", args)
+	}
+
 	// Call the MCP tool
 	// The method is usually "tools/call".
 	params := map[string]any{
 		"name":      t.name,
-		"arguments": args,
+		"arguments": argsMap,
 	}
 	
 	var callResult mcp.CallToolResult
@@ -48,6 +167,11 @@ func (t *MCPTool) Run(ctx adktool.Context, args map[string]any) (map[string]any,
 	output := make(map[string]any)
 	if callResult.IsError {
 		output["error"] = true
+		for _, c := range callResult.Content {
+			if c.Type == "text" {
+				fmt.Fprintf(os.Stderr, "Tool Error (%s): %s\n", t.name, c.Text)
+			}
+		}
 	}
 	
 	// Aggregate text content
@@ -143,6 +267,7 @@ func LoadTools(agent *Agent, store *tool.Store) ([]adktool.Tool, error) {
 				mcpTool := &MCPTool{
 					name:        t.Name,
 					description: t.Description,
+					inputSchema: t.InputSchema,
 					client:      client,
 				}
 				loadedTools = append(loadedTools, mcpTool)
