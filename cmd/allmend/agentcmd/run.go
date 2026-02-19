@@ -33,7 +33,13 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("Agent '%s' not found in paths: %v\n", agentName, paths)
 		}
 
+		// Check tools
+		if err := CheckTools(targetAgent); err != nil {
+			return fmt.Errorf("tool check failed: %w", err)
+		}
+
 		// 2. Set runtime config
+
 		modelName := viper.GetString("default_model")
 		if m, _ := cmd.Flags().GetString("model"); m != "" {
 			modelName = m
