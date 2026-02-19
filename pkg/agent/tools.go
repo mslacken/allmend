@@ -19,13 +19,14 @@ import (
 
 // SubAgentTool wraps an ADK agent as a tool.
 type SubAgentTool struct {
-	runner    *runner.Runner
-	sessionID string
-	name      string
-	desc      string
+	runner       *runner.Runner
+	sessionID    string
+	name         string
+	desc         string
+	confirmation bool
 }
 
-func NewSubAgentTool(agent adkagent.Agent, name, desc string) (*SubAgentTool, error) {
+func NewSubAgentTool(agent adkagent.Agent, name, desc string, confirmation bool) (*SubAgentTool, error) {
 	sessionService := session.InMemoryService()
 	r, err := runner.New(runner.Config{
 		AppName:        name,
@@ -46,10 +47,11 @@ func NewSubAgentTool(agent adkagent.Agent, name, desc string) (*SubAgentTool, er
 	}
 
 	return &SubAgentTool{
-		runner:    r,
-		sessionID: s.Session.ID(),
-		name:      name,
-		desc:      desc,
+		runner:       r,
+		sessionID:    s.Session.ID(),
+		name:         name,
+		desc:         desc,
+		confirmation: confirmation,
 	}, nil
 }
 
@@ -59,6 +61,10 @@ func (t *SubAgentTool) Name() string {
 
 func (t *SubAgentTool) Description() string {
 	return t.desc
+}
+
+func (t *SubAgentTool) Confirmation() bool {
+	return t.confirmation
 }
 
 func (t *SubAgentTool) IsLongRunning() bool {
@@ -148,10 +154,11 @@ func RegisterTool(req *adkmodel.LLMRequest, decl *genai.FunctionDeclaration, too
 
 // MCPTool implements adktool.Tool for an MCP tool.
 type MCPTool struct {
-	name        string
-	description string
-	inputSchema any
-	client      *mcp.Client
+	name           string
+	description    string
+	inputSchema    any
+	client         *mcp.Client
+	noConfirmation bool
 }
 
 func (t *MCPTool) Name() string {
@@ -160,6 +167,10 @@ func (t *MCPTool) Name() string {
 
 func (t *MCPTool) Description() string {
 	return t.description
+}
+
+func (t *MCPTool) NoConfirmation() bool {
+	return t.noConfirmation
 }
 
 func (t *MCPTool) IsLongRunning() bool {
@@ -352,13 +363,13 @@ func LoadTools(agent *Agent, store *tool.Store) ([]adktool.Tool, error) {
 
 	var loadedTools []adktool.Tool
 	
-	// Collect all requested tool names
-	requested := make(map[string]bool)
+	// Collect all requested tool names and their config
+	requested := make(map[string]*MCPTools)
 	for _, t := range agent.Tools.Required {
-		requested[t.Name] = true
+		requested[t.Name] = t
 	}
 	for _, t := range agent.Tools.Recommended {
-		requested[t.Name] = true
+		requested[t.Name] = t
 	}
 
 	// Iterate over servers to find matching tools
@@ -373,12 +384,13 @@ func LoadTools(agent *Agent, store *tool.Store) ([]adktool.Tool, error) {
 		}
 
 		for _, t := range tools {
-			if requested[t.Name] {
+			if config, ok := requested[t.Name]; ok {
 				mcpTool := &MCPTool{
-					name:        t.Name,
-					description: t.Description,
-					inputSchema: t.InputSchema,
-					client:      client,
+					name:           t.Name,
+					description:    t.Description,
+					inputSchema:    t.InputSchema,
+					client:         client,
+					noConfirmation: config.NoConfirmation,
 				}
 				loadedTools = append(loadedTools, mcpTool)
 			}

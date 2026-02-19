@@ -24,6 +24,8 @@ type Agent struct {
 	ModelsFilePath string `json:"-" yaml:"-"`
 	// ProvidersFilePath is the path to the providers configuration file
 	ProvidersFilePath string `json:"-" yaml:"-"`
+	// Confirmation defines if the agent needs confirmation before being called (for HITL)
+	Confirmation bool `json:"confirmation,omitempty" yaml:"confirmation,omitempty"`
 }
 
 type AgentManifest struct {
@@ -45,6 +47,8 @@ type MCPTools struct {
 	Version string `json:"version" yaml:"version"`
 	// is the tool read only, can it be called without asking the user
 	ReadOnly bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
+	// NoConfirmation defines if the tool can be called without asking the user (for HITL)
+	NoConfirmation bool `json:"no_confirmation,omitempty" yaml:"no_confirmation,omitempty"`
 	// trusted keys, which are allowed to sign the tool
 	Keys []string `json:"keys,omitempty" yaml:"keys,omitempty"`
 }

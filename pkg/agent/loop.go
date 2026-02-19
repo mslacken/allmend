@@ -43,7 +43,7 @@ func (u *SessionUsage) Print() {
 }
 
 // Run starts the agent. If chat is true, it enters an interactive loop.
-func (agent *Agent) Run(ctx context.Context, chat bool) error {
+func (agent *Agent) Run(ctx context.Context, chat bool, hitl bool) error {
 	// 1. Load model config
 	if agent.ModelsFilePath == "" {
 		return fmt.Errorf("ModelsFilePath is not set")
@@ -133,18 +133,57 @@ func (agent *Agent) Run(ctx context.Context, chat bool) error {
 			}
 		}
 
-		// Create sub-agent
-		subAdkAgent, err := llmagent.New(llmagent.Config{
+		// Config for sub-agent
+		subConfig := llmagent.Config{
 			Model:       llm,
 			Instruction: instruction,
 			Name:        sub.Name,
 			Tools:       subTools,
-		})
+		}
+
+		if hitl {
+			subConfig.BeforeToolCallbacks = []llmagent.BeforeToolCallback{
+				func(ctx adktool.Context, t adktool.Tool, args map[string]any) (map[string]any, error) {
+					toolType := "tool"
+					needsConfirmation := true // Default for tools
+
+					if st, ok := t.(*SubAgentTool); ok {
+						toolType = "subagent"
+						needsConfirmation = st.Confirmation()
+					} else if mt, ok := t.(*MCPTool); ok {
+						if mt.NoConfirmation() {
+							needsConfirmation = false
+						}
+					}
+
+					if !needsConfirmation {
+						return nil, nil // Proceed without asking
+					}
+
+					fmt.Printf("\n[SubAgent: %s] Requesting to run %s '%s' with args: %v\n", sub.Name, toolType, t.Name(), args)
+					fmt.Print("Allow execution? (y/n): ")
+					
+					var response string
+					fmt.Scanln(&response)
+					response = strings.ToLower(strings.TrimSpace(response))
+					
+					if response == "y" || response == "yes" {
+						return nil, nil // Proceed
+					}
+					
+					fmt.Println("Tool execution denied by user.")
+					return nil, fmt.Errorf("tool execution denied by user")
+				},
+			}
+		}
+
+		// Create sub-agent
+		subAdkAgent, err := llmagent.New(subConfig)
 		if err != nil {
 			return fmt.Errorf("error creating sub-agent %s: %w", sub.Name, err)
 		}
 		
-		subTool, err := NewSubAgentTool(subAdkAgent, sub.Name, sub.Description)
+		subTool, err := NewSubAgentTool(subAdkAgent, sub.Name, sub.Description, sub.Confirmation)
 		if err != nil {
 			return fmt.Errorf("error wrapping sub-agent %s as tool: %w", sub.Name, err)
 		}
@@ -152,12 +191,50 @@ func (agent *Agent) Run(ctx context.Context, chat bool) error {
 	}
 
 	// 4. Create ADK Agent
-	adkAgent, err := llmagent.New(llmagent.Config{
+	adkConfig := llmagent.Config{
 		Model:       llm,
 		Instruction: agent.Manifest.Content,
 		Name:        agent.Name,
 		Tools:       agentTools,
-	})
+	}
+
+	if hitl {
+		adkConfig.BeforeToolCallbacks = []llmagent.BeforeToolCallback{
+			func(ctx adktool.Context, t adktool.Tool, args map[string]any) (map[string]any, error) {
+				toolType := "tool"
+				needsConfirmation := true // Default for tools
+
+				if st, ok := t.(*SubAgentTool); ok {
+					toolType = "subagent"
+					needsConfirmation = st.Confirmation() // Default for agents is false, unless set
+				} else if mt, ok := t.(*MCPTool); ok {
+					if mt.NoConfirmation() {
+						needsConfirmation = false
+					}
+				}
+
+				if !needsConfirmation {
+					return nil, nil // Proceed without asking
+				}
+
+				fmt.Printf("\n[Agent: %s] Requesting to run %s '%s' with args: %v\n", agent.Name, toolType, t.Name(), args)
+				fmt.Print("Allow execution? (y/n): ")
+				
+				var response string
+				fmt.Scanln(&response)
+				response = strings.ToLower(strings.TrimSpace(response))
+				
+				if response == "y" || response == "yes" {
+					return nil, nil // Proceed
+				}
+				
+				fmt.Println("Tool execution denied by user.")
+				return nil, fmt.Errorf("tool execution denied by user")
+			},
+		}
+	}
+
+	adkAgent, err := llmagent.New(adkConfig)
 	if err != nil {
 		return fmt.Errorf("error creating ADK agent: %w", err)
 	}

@@ -14,15 +14,10 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"google.golang.org/adk/model"
-	adktool "google.golang.org/adk/tool"
 	"google.golang.org/genai"
 )
 
 var yieldErr = fmt.Errorf("yield stopped")
-
-type runnableTool interface {
-	Run(ctx adktool.Context, args any) (map[string]any, error)
-}
 
 // Provider implements the model.LLM interface for Ollama.
 type Provider struct {
@@ -80,18 +75,59 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 				role = "assistant"
 			}
 
-			var textContent string
-			for _, part := range content.Parts {
-				if part.Text != "" {
-					textContent += part.Text
-				}
-				// TODO: Handle other part types like images if needed
-			}
+			if role == "assistant" {
+				var textContent string
+				var toolCalls []api.ToolCall
 
-			messages = append(messages, api.Message{
-				Role:    role,
-				Content: textContent,
-			})
+				for _, part := range content.Parts {
+					if part.Text != "" {
+						textContent += part.Text
+					}
+					if part.FunctionCall != nil {
+						args := api.NewToolCallFunctionArguments()
+						for k, v := range part.FunctionCall.Args {
+							args.Set(k, v)
+						}
+						toolCalls = append(toolCalls, api.ToolCall{
+							Function: api.ToolCallFunction{
+								Name:      part.FunctionCall.Name,
+								Arguments: args,
+							},
+						})
+					}
+				}
+				messages = append(messages, api.Message{
+					Role:      role,
+					Content:   textContent,
+					ToolCalls: toolCalls,
+				})
+			} else {
+				// User or Function/Tool role
+				// ADK sends FunctionResponse with Role="user"
+				for _, part := range content.Parts {
+					if part.FunctionResponse != nil {
+						// Convert FunctionResponse to Tool message
+						var toolResult string
+						res := part.FunctionResponse.Response
+						if c, ok := res["content"]; ok {
+							toolResult = fmt.Sprintf("%v", c)
+						} else {
+							resBytes, _ := json.Marshal(res)
+							toolResult = string(resBytes)
+						}
+
+						messages = append(messages, api.Message{
+							Role:    "tool",
+							Content: toolResult,
+						})
+					} else if part.Text != "" {
+						messages = append(messages, api.Message{
+							Role:    "user",
+							Content: part.Text,
+						})
+					}
+				}
+			}
 		}
 
 		// Configure Options once
@@ -173,150 +209,78 @@ func (p *Provider) GenerateContent(ctx context.Context, req *model.LLMRequest, s
 			}
 		}
 
-		// Loop for tool execution
-		maxTurns := 10 // Safety limit
-		for turn := 0; turn < maxTurns; turn++ {
-			chatReq := &api.ChatRequest{
-				Model:       p.model,
-				Messages:    messages,
-				Stream:      &stream,
-				Format:      format,
-				KeepAlive:   keepAlive,
-				Think:       think,
-				Truncate:    truncate,
-				Shift:       shift,
-				Logprobs:    logprobs != nil && *logprobs,
-				TopLogprobs: topLogprobs,
-				Options:     options,
-				Tools:       tools,
+		chatReq := &api.ChatRequest{
+			Model:       p.model,
+			Messages:    messages,
+			Stream:      &stream,
+			Format:      format,
+			KeepAlive:   keepAlive,
+			Think:       think,
+			Truncate:    truncate,
+			Shift:       shift,
+			Logprobs:    logprobs != nil && *logprobs,
+			TopLogprobs: topLogprobs,
+			Options:     options,
+			Tools:       tools,
+		}
+
+		err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {
+			llmResp := &model.LLMResponse{
+				Content: &genai.Content{
+					Role: "model",
+					Parts: []*genai.Part{},
+				},
+				TurnComplete: resp.Done,
 			}
 
-			var fullOutput string
-			var toolCalls []api.ToolCall
-			
-			// Track if we yielded anything in this turn
-			yieldedContent := false
-
-			err := p.client.Chat(ctx, chatReq, func(resp api.ChatResponse) error {
-				fullOutput += resp.Message.Content
-				
-				// Collect tool calls
-				if len(resp.Message.ToolCalls) > 0 {
-					toolCalls = append(toolCalls, resp.Message.ToolCalls...)
-				}
-
-				llmResp := &model.LLMResponse{
-					Content: &genai.Content{
-						Role: "model",
-						Parts: []*genai.Part{},
-					},
-					// We only mark TurnComplete if we are done AND have no tool calls to process locally
-					TurnComplete: resp.Done && len(resp.Message.ToolCalls) == 0, 
-				}
-
-				// Handle Thinking
-				if resp.Message.Thinking != "" {
-					llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: fmt.Sprintf("<thinking>%s</thinking>", resp.Message.Thinking)})
-				}
-
-				if resp.Message.Content != "" {
-					llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: resp.Message.Content})
-				}
-
-				// Only yield if we have content or if we are done and have nothing else.
-				// If we have tool calls, we assume we will handle them and yield subsequent results.
-				// However, the caller might want to see the partial text.
-				
-				if len(llmResp.Content.Parts) > 0 {
-					yieldedContent = true
-					if !yield(llmResp, nil) {
-						return yieldErr
-					}
-				}
-				
-				if resp.DoneReason == "length" {
-					if !yield(nil, fmt.Errorf("context overrun")) {
-						return yieldErr
-					}
-					return nil
-				}
-
-				return nil
-			})
-
-			if err != nil {
-				if err == yieldErr {
-					return
-				}
-				yield(nil, err)
-				return
+			// Handle Thinking
+			if resp.Message.Thinking != "" {
+				llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: fmt.Sprintf("<thinking>%s</thinking>", resp.Message.Thinking)})
 			}
 
-			// If no tool calls, we are done
-			if len(toolCalls) == 0 {
-				if !yieldedContent {
-					// Yield at least one empty response to signal completion if nothing was streamed
-					yield(&model.LLMResponse{
-						Content: &genai.Content{Role: "model"}, 
-						TurnComplete: true,
-					}, nil)
-				}
-				return
+			if resp.Message.Content != "" {
+				llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{Text: resp.Message.Content})
 			}
 
-			// Add assistant message with tool calls to history for next turn
-			messages = append(messages, api.Message{
-				Role:      "assistant",
-				Content:   fullOutput,
-				ToolCalls: toolCalls,
-			})
-
-			// Execute tools
-			for _, tc := range toolCalls {
+			// Handle Tool Calls
+			for _, tc := range resp.Message.ToolCalls {
 				var argsMap map[string]any
 				data, err := json.Marshal(tc.Function.Arguments)
 				if err == nil {
 					_ = json.Unmarshal(data, &argsMap)
 				}
 
-				toolName := tc.Function.Name
-				var toolResult string
-				
-				if tObj, ok := req.Tools[toolName]; ok {
-					if tool, ok := tObj.(runnableTool); ok {
-						// Execute
-						res, err := tool.Run(nil, argsMap) // context nil as discussed
-						if err != nil {
-							toolResult = fmt.Sprintf("Error executing tool %s: %v", toolName, err)
-						} else {
-							// Serialize result
-							// If result has "content" key (from MCP), use it.
-							if c, ok := res["content"]; ok {
-								toolResult = fmt.Sprintf("%v", c)
-							} else {
-								// Fallback JSON dump
-								resBytes, _ := json.Marshal(res)
-								toolResult = string(resBytes)
-							}
-						}
-					} else {
-						toolResult = fmt.Sprintf("Tool %s is not executable (does not implement Run)", toolName)
-					}
-				} else {
-					toolResult = fmt.Sprintf("Tool %s not found", toolName)
-				}
-
-				// Append tool result to history
-				messages = append(messages, api.Message{
-					Role:    "tool",
-					Content: toolResult,
+				llmResp.Content.Parts = append(llmResp.Content.Parts, &genai.Part{
+					FunctionCall: &genai.FunctionCall{
+						Name: tc.Function.Name,
+						Args: argsMap,
+					},
 				})
 			}
-			
-			// Loop continues to next turn with updated messages
+
+			if len(llmResp.Content.Parts) > 0 {
+				if !yield(llmResp, nil) {
+					return yieldErr
+				}
+			}
+
+			if resp.DoneReason == "length" {
+				if !yield(nil, fmt.Errorf("context overrun")) {
+					return yieldErr
+				}
+				return nil
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			if err == yieldErr {
+				return
+			}
+			yield(nil, err)
+			return
 		}
-		
-		yield(nil, fmt.Errorf("max turns exceeded"))
 	}
 }
 
