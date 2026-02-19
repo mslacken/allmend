@@ -29,7 +29,7 @@ var checkCmd = &cobra.Command{
 			return fmt.Errorf("agent '%s' not found", agentName)
 		}
 
-		// 2. Load Tools
+		// 2. Load Tools Store
 		toolsPath, err := toolcmd.GetToolsFilePath()
 		if err != nil {
 			return fmt.Errorf("error determining tools file path: %w", err)
@@ -37,20 +37,25 @@ var checkCmd = &cobra.Command{
 
 		toolStore, err := tool.Load(toolsPath)
 		if err != nil {
-			// If file doesn't exist, treat as empty? Or error?
-			// tool.Load returns empty store if file not found (and creates it).
 			return fmt.Errorf("error loading tools from %s: %w", toolsPath, err)
 		}
 
-		availableTools := make(map[string]bool)
-		for _, t := range toolStore.List() {
-			availableTools[t.Name] = true
-		}
-
-		// 3. Check Tools
+		// 3. Check Tools using agent.LoadTools
+		// This will dynamically fetch tools from servers matching the agent's requirements.
 		if targetAgent.Tools == nil {
 			fmt.Println("Agent has no tool requirements.")
 			return nil
+		}
+
+		fmt.Printf("Checking tools for agent '%s'...\n", agentName)
+		loadedTools, err := agent.LoadTools(targetAgent, toolStore)
+		if err != nil {
+			return fmt.Errorf("error loading tools: %w", err)
+		}
+
+		availableTools := make(map[string]bool)
+		for _, t := range loadedTools {
+			availableTools[t.Name()] = true
 		}
 
 		var missingRequired []string

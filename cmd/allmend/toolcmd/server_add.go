@@ -132,7 +132,8 @@ For Stdio servers:
 				InputSchema: t.InputSchema,
 			})
 		}
-		server.Tools = tools
+		// server.Tools field removed
+
 
 		// 3. Load Store
 		path, err := GetToolsFilePath()

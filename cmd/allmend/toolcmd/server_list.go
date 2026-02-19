@@ -34,14 +34,14 @@ var serverListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTYPE\tCONNECTION\tTOOLS COUNT")
+		fmt.Fprintln(w, "NAME\tTYPE\tCONNECTION")
 
 		for _, s := range store.Servers {
 			conn := s.URL
 			if s.Type == "stdio" {
 				conn = strings.Join(s.Command, " ")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d\n", s.Name, s.Type, conn, len(s.Tools))
+			fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, s.Type, conn)
 		}
 		w.Flush()
 	},

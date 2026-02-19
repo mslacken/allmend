@@ -1,12 +1,14 @@
 package toolcmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/SUSE/allmend/pkg/mcp"
 	"github.com/SUSE/allmend/pkg/tool"
 	"github.com/spf13/cobra"
 )
@@ -44,6 +46,8 @@ var listCmd = &cobra.Command{
 		}
 
 		var items []toolInfo
+		ctx := context.Background()
+
 		for _, s := range store.Servers {
 			conn := s.URL
 			if s.Type == "stdio" {
@@ -51,7 +55,45 @@ var listCmd = &cobra.Command{
 				conn = strings.Join(s.Command, " ")
 			}
 			
-			for _, t := range s.Tools {
+			// Connect to server
+			var transport mcp.Transport
+			if s.Type == "stdio" {
+				var env []string
+				if val, ok := s.Config["env"]; ok {
+					switch v := val.(type) {
+					case []string:
+						env = v
+					case []interface{}:
+						for _, e := range v {
+							if str, ok := e.(string); ok {
+								env = append(env, str)
+							}
+						}
+					}
+				}
+				transport = mcp.NewStdioTransport(s.Command, env)
+			} else {
+				transport = mcp.NewHTTPTransport(s.URL)
+			}
+
+			client := mcp.NewClient(transport)
+			
+			// Initialize
+			if _, err := client.Initialize(ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to connect to server %s: %v\n", s.Name, err)
+				client.Close()
+				continue
+			}
+
+			tools, err := client.ListTools(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to list tools from server %s: %v\n", s.Name, err)
+				client.Close()
+				continue
+			}
+			client.Close()
+
+			for _, t := range tools {
 				items = append(items, toolInfo{
 					Name:        t.Name,
 					Description: t.Description,
@@ -76,9 +118,6 @@ var listCmd = &cobra.Command{
 			if len(desc) > 50 {
 				desc = desc[:47] + "..."
 			}
-			
-			// For http type, maybe empty connection if it's just URL which is same as name sometimes?
-			// But user asked to "provide the command".
 			
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", item.Name, item.ServerName, item.ServerType, item.Connection, desc)
 		}

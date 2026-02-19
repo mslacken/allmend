@@ -102,8 +102,6 @@ func TestAddToolServer(t *testing.T) {
 		s, ok := store.Servers[server.URL]
 		require.True(t, ok)
 		assert.Equal(t, server.URL, s.URL)
-		assert.Len(t, s.Tools, 1)
-		assert.Equal(t, "test-tool", s.Tools[0].Name)
 	})
 
 	t.Run("AddExistingServer", func(t *testing.T) {

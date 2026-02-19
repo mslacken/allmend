@@ -2,11 +2,15 @@ package agentcmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/SUSE/allmend/internal/testenv"
+	"github.com/SUSE/allmend/pkg/mcp"
 	"github.com/SUSE/allmend/pkg/tool"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
@@ -26,6 +30,48 @@ func captureOutput(f func()) string {
 	return buf.String()
 }
 
+func mockMCPServer(tools []mcp.Tool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcp.JSONRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		res := mcp.JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+		}
+
+		switch req.Method {
+		case "initialize":
+			result := mcp.InitializeResult{
+				ProtocolVersion: "2024-11-05",
+				ServerInfo: mcp.Implementation{
+					Name:    "mock-server",
+					Version: "1.0.0",
+				},
+			}
+			res.Result = result
+		case "notifications/initialized":
+			return
+		case "tools/list":
+			result := mcp.ListToolsResult{
+				Tools: tools,
+			}
+			res.Result = result
+		default:
+			err := mcp.RPCError{
+				Code:    -32601,
+				Message: "Method not found",
+			}
+			res.Error = &err
+		}
+
+		json.NewEncoder(w).Encode(res)
+	}))
+}
+
 func TestCheckAgent(t *testing.T) {
 	env := testenv.New(t)
 	defer env.RemoveAll()
@@ -41,31 +87,29 @@ req_tool_2
 rec_tool_1
 rec_tool_2
 `
-	// testenv already configures agent_paths to point to agents/ directory
 	env.WriteFile("agents/test.agt", agentContent)
 
-	// 2. Setup Tools
-	// req_tool_1 exists, req_tool_2 missing
-	// rec_tool_1 missing, rec_tool_2 exists
-	servers := map[string]tool.Server{
-		"server1": {
-			Name: "server1",
-			Type: "http",
-			URL:  "http://example.com",
-			Tools: []tool.Tool{
-				{Name: "req_tool_1"},
-				{Name: "rec_tool_2"},
-			},
-		},
-	}
-	config := map[string]interface{}{
-		"servers": servers,
-	}
-	toolsBytes, _ := yaml.Marshal(config)
-	// Default location for tools file is config/tools.conf relative to config file
-	env.WriteFile("config/tools.conf", string(toolsBytes))
-
 	t.Run("CheckMissingTools", func(t *testing.T) {
+		// Mock server with only some tools
+		server := mockMCPServer([]mcp.Tool{
+			{Name: "req_tool_1"},
+			{Name: "rec_tool_2"},
+		})
+		defer server.Close()
+
+		servers := map[string]tool.Server{
+			"server_missing": {
+				Name: "server_missing",
+				Type: "http",
+				URL:  server.URL,
+			},
+		}
+		config := map[string]interface{}{
+			"servers": servers,
+		}
+		toolsBytes, _ := yaml.Marshal(config)
+		env.WriteFile("config/tools.conf", string(toolsBytes))
+
 		var err error
 		output := captureOutput(func() {
 			err = checkCmd.RunE(checkCmd, []string{"TestAgent"})
@@ -93,19 +137,25 @@ rec_tool_2
 	})
 	
 	t.Run("CheckAllToolsAvailable", func(t *testing.T) {
-		// Update tools to have everything
-		servers["server1"] = tool.Server{
-			Name: "server1",
-			Type: "http",
-			URL:  "http://example.com",
-			Tools: []tool.Tool{
-				{Name: "req_tool_1"},
-				{Name: "req_tool_2"},
-				{Name: "rec_tool_1"},
-				{Name: "rec_tool_2"},
+		// Mock server with all tools
+		server := mockMCPServer([]mcp.Tool{
+			{Name: "req_tool_1"},
+			{Name: "req_tool_2"},
+			{Name: "rec_tool_1"},
+			{Name: "rec_tool_2"},
+		})
+		defer server.Close()
+		
+		servers := map[string]tool.Server{
+			"server_all": {
+				Name: "server_all",
+				Type: "http",
+				URL:  server.URL,
 			},
 		}
-		config["servers"] = servers
+		config := map[string]interface{}{
+			"servers": servers,
+		}
 		toolsBytes, _ := yaml.Marshal(config)
 		env.WriteFile("config/tools.conf", string(toolsBytes))
 		

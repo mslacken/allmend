@@ -259,11 +259,17 @@ func LoadTools(agent *Agent, store *tool.Store) ([]adktool.Tool, error) {
 
 	// Iterate over servers to find matching tools
 	for _, server := range store.Servers {
-		// Check if any tool in this server matches requested
-		for _, t := range server.Tools {
+		client := getClient(server)
+		
+		// Dynamically fetch tools from the server
+		tools, err := client.ListTools(context.Background())
+		if err != nil {
+			fmt.Printf("Warning: failed to list tools from server %s: %v\n", server.Name, err)
+			continue
+		}
+
+		for _, t := range tools {
 			if requested[t.Name] {
-				client := getClient(server)
-				
 				mcpTool := &MCPTool{
 					name:        t.Name,
 					description: t.Description,

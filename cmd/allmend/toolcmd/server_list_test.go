@@ -38,18 +38,11 @@ func TestServerList(t *testing.T) {
 			Name: "server1",
 			Type: "http",
 			URL:  "http://example.com/api",
-			Tools: []tool.Tool{
-				{Name: "tool1"},
-			},
 		},
 		"server2": {
 			Name: "server2",
 			Type: "stdio",
 			Command: []string{"npx", "server"},
-			Tools: []tool.Tool{
-				{Name: "tool2"},
-				{Name: "tool3"},
-			},
 		},
 	}
 	config := map[string]interface{}{
@@ -69,19 +62,18 @@ func TestServerList(t *testing.T) {
 		assert.Contains(t, output, "NAME")
 		assert.Contains(t, output, "TYPE")
 		assert.Contains(t, output, "CONNECTION")
-		assert.Contains(t, output, "TOOLS COUNT")
+		assert.NotContains(t, output, "TOOLS COUNT")
 
 		// Check server 1
 		assert.Contains(t, output, "server1")
 		assert.Contains(t, output, "http")
 		assert.Contains(t, output, "http://example.com/api")
-		assert.Contains(t, output, "1") // 1 tool
+		// Count check removed
 
 		// Check server 2
 		assert.Contains(t, output, "server2")
 		assert.Contains(t, output, "stdio")
 		assert.Contains(t, output, "npx server")
-		assert.Contains(t, output, "2") // 2 tools
 	})
 
 	t.Run("ListNoServers", func(t *testing.T) {

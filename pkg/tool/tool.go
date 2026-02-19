@@ -7,7 +7,6 @@ type Server struct {
 	URL     string         `yaml:"url,omitempty"`     // for http
 	Command []string       `yaml:"command,omitempty"` // for stdio
 	Config  map[string]any `yaml:"config,omitempty"`
-	Tools   []Tool         `yaml:"tools,omitempty"` // Cached tools
 }
 
 // Tool defines the structure for a tool available on a server.
