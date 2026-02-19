@@ -84,3 +84,42 @@ tool3
 		}
 	}
 }
+
+func TestParseSubAgents(t *testing.T) {
+	agt := `%Meta
+Name: Parent
+%Subagent
+Child1
+Description for Child1
+%Tools
+%Required
+child_tool
+%Subagent
+Child2
+`
+	r := strings.NewReader(agt)
+	agent, err := ParseAgent(r)
+	if err != nil {
+		t.Fatalf("ParseAgent failed: %v", err)
+	}
+
+	if len(agent.SubAgents) != 2 {
+		t.Fatalf("Expected 2 sub-agents, got %d", len(agent.SubAgents))
+	}
+
+	sub1 := agent.SubAgents[0]
+	if sub1.Name != "Child1" {
+		t.Errorf("Expected sub1 name 'Child1', got '%s'", sub1.Name)
+	}
+	if sub1.Description != "Description for Child1" {
+		t.Errorf("Expected sub1 description 'Description for Child1', got '%s'", sub1.Description)
+	}
+	if len(sub1.Tools.Required) != 1 || sub1.Tools.Required[0].Name != "child_tool" {
+		t.Errorf("Sub1 tool mismatch")
+	}
+
+	sub2 := agent.SubAgents[1]
+	if sub2.Name != "Child2" {
+		t.Errorf("Expected sub2 name 'Child2', got '%s'", sub2.Name)
+	}
+}

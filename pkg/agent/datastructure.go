@@ -14,6 +14,8 @@ type Agent struct {
 	Mission *AgentMission `json:"mission" yaml:"mission"`
 	// needed and recommended tools
 	Tools *AgentTools `json:"tools,omitempty" yaml:"tools,omitempty"`
+	// SubAgents are helper agents that this agent can delegate to
+	SubAgents []*Agent `json:"sub_agents,omitempty" yaml:"sub_agents,omitempty"`
 	// metdata of the agent
 	Meta *AgentMeta `json:"meta,omitempty" yaml:"meta,omitempty"`
 	// RuntimeModel is the name of the model to use for the agent

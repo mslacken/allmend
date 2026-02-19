@@ -4,14 +4,147 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/SUSE/allmend/pkg/mcp"
 	"github.com/SUSE/allmend/pkg/tool"
+	adkagent "google.golang.org/adk/agent"
 	adkmodel "google.golang.org/adk/model"
+	"google.golang.org/adk/runner"
+	"google.golang.org/adk/session"
 	adktool "google.golang.org/adk/tool"
 	"google.golang.org/genai"
 )
+
+// SubAgentTool wraps an ADK agent as a tool.
+type SubAgentTool struct {
+	runner    *runner.Runner
+	sessionID string
+	name      string
+	desc      string
+}
+
+func NewSubAgentTool(agent adkagent.Agent, name, desc string) (*SubAgentTool, error) {
+	sessionService := session.InMemoryService()
+	r, err := runner.New(runner.Config{
+		AppName:        name,
+		Agent:          agent,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runner for sub-agent %s: %w", name, err)
+	}
+
+	// Create session for the tool usage
+	s, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: name,
+		UserID:  "user",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session for sub-agent %s: %w", name, err)
+	}
+
+	return &SubAgentTool{
+		runner:    r,
+		sessionID: s.Session.ID(),
+		name:      name,
+		desc:      desc,
+	}, nil
+}
+
+func (t *SubAgentTool) Name() string {
+	return t.name
+}
+
+func (t *SubAgentTool) Description() string {
+	return t.desc
+}
+
+func (t *SubAgentTool) IsLongRunning() bool {
+	return false
+}
+
+func (t *SubAgentTool) Declaration() *genai.FunctionDeclaration {
+	return &genai.FunctionDeclaration{
+		Name:        t.name,
+		Description: t.desc,
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"instruction": {
+					Type:        genai.TypeString,
+					Description: "The instruction for the sub-agent.",
+				},
+			},
+			Required: []string{"instruction"},
+		},
+	}
+}
+
+func (t *SubAgentTool) ProcessRequest(ctx adktool.Context, req *adkmodel.LLMRequest) error {
+	return RegisterTool(req, t.Declaration(), t)
+}
+
+func (t *SubAgentTool) Run(ctx adktool.Context, args any) (map[string]any, error) {
+	m, ok := args.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid args, expected map[string]any")
+	}
+	instruction, _ := m["instruction"].(string)
+
+	var output strings.Builder
+	
+	// Execute the runner
+	// Note: t.runner.Run returns iter.Seq2
+	for event, err := range t.runner.Run(ctx, "user", t.sessionID, genai.NewContentFromText(instruction, genai.RoleUser), adkagent.RunConfig{}) {
+		if err != nil {
+			return nil, err
+		}
+		if event.Content != nil {
+			for _, part := range event.Content.Parts {
+				output.WriteString(part.Text)
+			}
+		}
+	}
+
+	return map[string]any{
+		"content": output.String(),
+	}, nil
+}
+
+// RegisterTool adds a tool declaration to the LLM request.
+func RegisterTool(req *adkmodel.LLMRequest, decl *genai.FunctionDeclaration, toolInstance any) error {
+	// Add to request config
+	if req.Config == nil {
+		req.Config = &genai.GenerateContentConfig{}
+	}
+	
+	// Check if we already have a Tool with FunctionDeclarations
+	var funcTool *genai.Tool
+	for _, gt := range req.Config.Tools {
+		if gt.FunctionDeclarations != nil {
+			funcTool = gt
+			break
+		}
+	}
+	
+	if funcTool == nil {
+		funcTool = &genai.Tool{}
+		req.Config.Tools = append(req.Config.Tools, funcTool)
+	}
+	
+	funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
+	
+	// Also register this tool instance in req.Tools so the runner can find it to execute
+	if req.Tools == nil {
+		req.Tools = make(map[string]any)
+	}
+	// Use declaration name as key
+	req.Tools[decl.Name] = toolInstance
+
+	return nil
+}
 
 // MCPTool implements adktool.Tool for an MCP tool.
 type MCPTool struct {
@@ -58,36 +191,7 @@ func (t *MCPTool) Declaration() *genai.FunctionDeclaration {
 // ProcessRequest registers the tool with the LLM request.
 // This implements the toolinternal.RequestProcessor interface required by ADK.
 func (t *MCPTool) ProcessRequest(ctx adktool.Context, req *adkmodel.LLMRequest) error {
-	decl := t.Declaration()
-
-	// Add to request config
-	if req.Config == nil {
-		req.Config = &genai.GenerateContentConfig{}
-	}
-	
-	// Check if we already have a Tool with FunctionDeclarations
-	var funcTool *genai.Tool
-	for _, gt := range req.Config.Tools {
-		if gt.FunctionDeclarations != nil {
-			funcTool = gt
-			break
-		}
-	}
-	
-	if funcTool == nil {
-		funcTool = &genai.Tool{}
-		req.Config.Tools = append(req.Config.Tools, funcTool)
-	}
-	
-	funcTool.FunctionDeclarations = append(funcTool.FunctionDeclarations, decl)
-	
-	// Also register this tool instance in req.Tools so the runner can find it to execute
-	if req.Tools == nil {
-		req.Tools = make(map[string]any)
-	}
-	req.Tools[t.name] = t
-
-	return nil
+	return RegisterTool(req, t.Declaration(), t)
 }
 
 func mapToGenaiSchema(m map[string]any) (*genai.Schema, error) {

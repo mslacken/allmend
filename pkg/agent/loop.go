@@ -110,6 +110,47 @@ func (agent *Agent) Run(ctx context.Context, chat bool) error {
 		}
 	}
 
+	// Initialize SubAgents
+	for _, sub := range agent.SubAgents {
+		// Inherit Manifest if not set
+		if sub.Manifest == nil {
+			sub.Manifest = agent.Manifest
+		} else if sub.Manifest.Content == "" && agent.Manifest != nil {
+			sub.Manifest.Content = agent.Manifest.Content
+		}
+
+		instruction := ""
+		if sub.Manifest != nil {
+			instruction = sub.Manifest.Content
+		}
+
+		// Load tools for sub-agent
+		var subTools []adktool.Tool
+		if toolStore != nil {
+			subTools, err = LoadTools(sub, toolStore)
+			if err != nil {
+				fmt.Printf("Warning: Failed to load tools for sub-agent %s: %v\n", sub.Name, err)
+			}
+		}
+
+		// Create sub-agent
+		subAdkAgent, err := llmagent.New(llmagent.Config{
+			Model:       llm,
+			Instruction: instruction,
+			Name:        sub.Name,
+			Tools:       subTools,
+		})
+		if err != nil {
+			return fmt.Errorf("error creating sub-agent %s: %w", sub.Name, err)
+		}
+		
+		subTool, err := NewSubAgentTool(subAdkAgent, sub.Name, sub.Description)
+		if err != nil {
+			return fmt.Errorf("error wrapping sub-agent %s as tool: %w", sub.Name, err)
+		}
+		agentTools = append(agentTools, subTool)
+	}
+
 	// 4. Create ADK Agent
 	adkAgent, err := llmagent.New(llmagent.Config{
 		Model:       llm,

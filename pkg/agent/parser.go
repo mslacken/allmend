@@ -52,6 +52,8 @@ func ParseAgent(r io.Reader) (*Agent, error) {
 		Meta:     &AgentMeta{},
 	}
 
+	var currentAgent *Agent = agent
+
 	for _, sec := range ast.Sections {
 		headerName := strings.TrimPrefix(strings.TrimSpace(sec.Header), "%")
 
@@ -63,20 +65,38 @@ func ParseAgent(r io.Reader) (*Agent, error) {
 		content := strings.TrimSpace(contentBuilder.String())
 
 		switch headerName {
+		case "Subagent":
+			// Start a new sub-agent
+			sub := &Agent{
+				Manifest: &AgentManifest{},
+				Mission:  &AgentMission{},
+				Tools:    &AgentTools{},
+				Meta:     &AgentMeta{},
+			}
+			// If content is provided, use it as name or parse it
+			if content != "" {
+				lines := strings.Split(content, "\n")
+				sub.Name = strings.TrimSpace(lines[0])
+				if len(lines) > 1 {
+					sub.Description = strings.TrimSpace(strings.Join(lines[1:], " "))
+				}
+			}
+			agent.SubAgents = append(agent.SubAgents, sub)
+			currentAgent = sub
 		case "Meta":
-			parseMetaLines(content, agent)
+			parseMetaLines(content, currentAgent)
 		case "Manifest":
-			agent.Manifest.Content = content
+			currentAgent.Manifest.Content = content
 		case "Mission":
-			agent.Mission.Content = content
+			currentAgent.Mission.Content = content
 		case "Description":
-			agent.Description = content
+			currentAgent.Description = content
 		case "Tools":
-			// Container header, ignore or handle if it has content
+			// Container header
 		case "Required":
-			agent.Tools.Required = append(agent.Tools.Required, parseTools(content)...)
+			currentAgent.Tools.Required = append(currentAgent.Tools.Required, parseTools(content)...)
 		case "Recommended":
-			agent.Tools.Recommended = append(agent.Tools.Recommended, parseTools(content)...)
+			currentAgent.Tools.Recommended = append(currentAgent.Tools.Recommended, parseTools(content)...)
 		}
 	}
 

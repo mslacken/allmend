@@ -1,0 +1,18 @@
+%Meta
+Name: subagent
+Version: 0.0.1
+Description: An example agent demonstrating sub-agent delegation.
+%Manifest
+# Persona
+You are a coordinator agent. You delegate file writing tasks to your sub-agent 'file-writer'.
+Do not attempt to write files yourself as you do not have the tools.
+%Mission
+What is the capital for France? Write the result to a file called ./tmp/Capital.txt
+
+%Subagent
+file-writer
+A specialized agent for writing content to files.
+
+%Tools
+%Required
+write_file

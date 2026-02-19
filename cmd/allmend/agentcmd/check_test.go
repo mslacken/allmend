@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SUSE/allmend/internal/testenv"
+	"github.com/SUSE/allmend/pkg/agent"
 	"github.com/SUSE/allmend/pkg/mcp"
 	"github.com/SUSE/allmend/pkg/tool"
 	"github.com/stretchr/testify/assert"
@@ -166,5 +167,60 @@ rec_tool_2
 
 		assert.NoError(t, err)
 		assert.Contains(t, output, "All required and recommended tools for agent 'TestAgent' are available.")
+	})
+
+	t.Run("CheckSubAgents", func(t *testing.T) {
+		// Mock server for sub-agent tools
+		server := mockMCPServer([]mcp.Tool{
+			{Name: "sub_tool_1"},
+		})
+		defer server.Close()
+
+		servers := map[string]tool.Server{
+			"server_sub": {
+				Name: "server_sub",
+				Type: "http",
+				URL:  server.URL,
+			},
+		}
+		config := map[string]interface{}{
+			"servers": servers,
+		}
+		toolsBytes, _ := yaml.Marshal(config)
+		env.WriteFile("config/tools.conf", string(toolsBytes))
+
+		// Manually construct agent with sub-agent
+		mainAgent := &agent.Agent{
+			Name: "MainAgent",
+			SubAgents: []*agent.Agent{
+				{
+					Name: "SubAgent1",
+					Tools: &agent.AgentTools{
+						Required: []*agent.MCPTools{
+							{Name: "sub_tool_1"},
+						},
+					},
+				},
+				{
+					Name: "SubAgent2",
+					Tools: &agent.AgentTools{
+						Required: []*agent.MCPTools{
+							{Name: "sub_tool_missing"},
+						},
+					},
+				},
+			},
+		}
+
+		// Use the internal checkAgentTools function via CheckTools
+		// But CheckTools loads file based on viper config.
+		// We can overwrite CheckTools to accept agent directly, which it does.
+		// But CheckTools loads tools from file.
+		
+		// Run CheckTools
+		err := checkAgentTools(mainAgent, &tool.Store{Servers: servers})
+		
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "missing required tools for agent SubAgent2")
 	})
 }
