@@ -16,6 +16,7 @@ import (
 	"github.com/SUSE/allmend/pkg/tool"
 	adkagent "google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
+	adkmodel "google.golang.org/adk/model"
 	adktool "google.golang.org/adk/tool"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
@@ -187,7 +188,9 @@ func (agent *Agent) Run(ctx context.Context, chat bool, hitl bool) error {
 		if err != nil {
 			return fmt.Errorf("error wrapping sub-agent %s as tool: %w", sub.Name, err)
 		}
-		agentTools = append(agentTools, subTool)
+		// Wrap with logger
+		loggedSubTool := &subAgentLogger{SubAgentTool: subTool}
+		agentTools = append(agentTools, loggedSubTool)
 	}
 
 	// 4. Create ADK Agent
@@ -206,7 +209,10 @@ func (agent *Agent) Run(ctx context.Context, chat bool, hitl bool) error {
 
 				if st, ok := t.(*SubAgentTool); ok {
 					toolType = "subagent"
-					needsConfirmation = st.Confirmation() // Default for agents is false, unless set
+					needsConfirmation = st.Confirmation()
+				} else if sl, ok := t.(*subAgentLogger); ok {
+					toolType = "subagent"
+					needsConfirmation = sl.Confirmation()
 				} else if mt, ok := t.(*MCPTool); ok {
 					if mt.NoConfirmation() {
 						needsConfirmation = false
@@ -382,4 +388,40 @@ func runOnce(ctx context.Context, agentRunner *runner.Runner, sessionID string, 
 	fmt.Println()
 	usage.Runtime = time.Since(startTime)
 	return usage, nil
+}
+
+// subAgentLogger wraps a SubAgentTool to add logging.
+type subAgentLogger struct {
+	*SubAgentTool
+}
+
+func (s *subAgentLogger) Run(ctx adktool.Context, args any) (map[string]any, error) {
+	instruction := ""
+	if m, ok := args.(map[string]any); ok {
+		instruction, _ = m["instruction"].(string)
+	}
+	fmt.Printf("\n[System] Calling sub-agent '%s' with instruction: %s\n", s.Name(), instruction)
+	
+	res, err := s.SubAgentTool.Run(ctx, args)
+	
+	if err != nil {
+		fmt.Printf("[System] Sub-agent '%s' execution failed: %v\n", s.Name(), err)
+		return nil, err
+	}
+
+	// Extract content for display
+	content := "no content"
+	if res != nil {
+		if c, ok := res["content"]; ok {
+			content = fmt.Sprintf("%v", c)
+		}
+	}
+	fmt.Printf("[System] Sub-agent '%s' result sent to agent:\n%s\n", s.Name(), content)
+	
+	return res, nil
+}
+
+func (s *subAgentLogger) ProcessRequest(ctx adktool.Context, req *adkmodel.LLMRequest) error {
+	// Register the wrapper 's' as the tool instance so the runner calls our Run method
+	return RegisterTool(req, s.SubAgentTool.Declaration(), s)
 }

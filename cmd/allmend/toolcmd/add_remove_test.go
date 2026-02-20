@@ -3,12 +3,14 @@ package toolcmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/SUSE/allmend/internal/testenv"
 	"github.com/SUSE/allmend/pkg/mcp"
@@ -33,6 +35,31 @@ func captureOutput(f func()) string {
 
 func mockMCPServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handle SSE request
+		if r.Method == "GET" && r.Header.Get("Accept") == "text/event-stream" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
+
+			// Send endpoint event
+			fmt.Fprintf(w, "event: endpoint\ndata: /rpc\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			
+			// Wait a bit to simulate open connection so client can read it
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+
+		// Handle POST request (JSON-RPC)
+		if r.Method != "POST" {
+			// For robustness, ignore other methods or return 405
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
 		var req mcp.JSONRPCRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)

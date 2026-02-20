@@ -63,7 +63,8 @@ var runCmd = &cobra.Command{
 
 		// 3. Run agent
 		chat, _ := cmd.Flags().GetBool("chat")
-		hitl, _ := cmd.Flags().GetBool("human-in-the-loop")
+		yolo, _ := cmd.Flags().GetBool("yolo")
+		hitl := !yolo
 		if err := targetAgent.Run(ctx, chat, hitl); err != nil {
 			return fmt.Errorf("Error running agent: %v\n", err)
 		}
@@ -74,6 +75,6 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringP("model", "m", "", "Model to use for the agent")
 	runCmd.Flags().BoolP("chat", "c", false, "Start an interactive chat session")
-	runCmd.Flags().Bool("human-in-the-loop", false, "Enable human-in-the-loop confirmation for tool calls")
+	runCmd.Flags().Bool("yolo", false, "Disable human-in-the-loop confirmation for tool calls (default is false, requiring confirmation)")
 	AgentCmd.AddCommand(runCmd)
 }
